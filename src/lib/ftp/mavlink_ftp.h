@@ -42,14 +42,20 @@
 #include <queue.h>
 #include <systemlib/err.h>
 
-#ifndef MAVLINK_FTP_UNIT_TEST
-#include "mavlink_bridge_header.h"
-#else
-#include <v2.0/standard/mavlink.h>
-#endif
+/**
+ * Get absolute time in [us] (does not wrap).
+ */
+static inline uint64_t absolute_time_us() {
+  struct timespec ts = {};
+  uint64_t result;
 
-class MavlinkFtpTest;
-class Mavlink;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  result = (uint64_t)(ts.tv_sec) * 1000000;
+  result += ts.tv_nsec / 1000;
+
+  return result;
+}
 
 /// MAVLink remote file server. Support FTP like commands using
 /// MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL message.
@@ -135,7 +141,7 @@ class MavlinkFTP {
     kErrFileNotFound        ///< File/directory not found
   };
 
-  unsigned get_size();
+  unsigned get_size() const;
 
  private:
   char *_data_as_cstring(PayloadHeader *payload);
@@ -211,7 +217,7 @@ class MavlinkFTP {
   static constexpr int _work_buffer1_len = kMaxDataLength;
   char *_work_buffer2{nullptr};
   static constexpr int _work_buffer2_len = 256;
-  hrt_abstime _last_work_buffer_access{
+  uint64_t _last_work_buffer_access{
       0};  ///< timestamp when the buffers were last accessed
 
   // prepend a root directory to each file/dir access to avoid enumerating the
@@ -227,7 +233,7 @@ class MavlinkFTP {
   bool _last_reply_valid = false;
   uint8_t _last_reply[MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN -
                       MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN +
-                      sizeof(PayloadHeader) + sizeof(uint32_t)];
+                      sizeof(PayloadHeader) + sizeof(uint32_t)]{};
 
   // Mavlink test needs to be able to call send
   friend class MavlinkFtpTest;

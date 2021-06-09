@@ -68,7 +68,7 @@ MavlinkFTP::~MavlinkFTP() {
   delete[] _work_buffer2;
 }
 
-unsigned MavlinkFTP::get_size() {
+unsigned MavlinkFTP::get_size() const {
   if (_session_info.stream_download) {
     return MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN +
            MAVLINK_NUM_NON_PAYLOAD_BYTES;
@@ -144,8 +144,7 @@ void MavlinkFTP::_process_request(mavlink_file_transfer_protocol_t *ftp_req,
                                   uint8_t target_system_id,
                                   uint8_t target_comp_id) {
   bool stream_send = false;
-  PayloadHeader *payload =
-      reinterpret_cast<PayloadHeader *>(&ftp_req->payload[0]);
+  auto *payload = reinterpret_cast<PayloadHeader *>(&ftp_req->payload[0]);
 
   ErrorCode errorCode = kErrNone;
 
@@ -165,9 +164,9 @@ void MavlinkFTP::_process_request(mavlink_file_transfer_protocol_t *ftp_req,
   // check the sequence number: if this is a resent request, resend the last
   // response
   if (_last_reply_valid) {
-    mavlink_file_transfer_protocol_t *last_reply =
+    auto *last_reply =
         reinterpret_cast<mavlink_file_transfer_protocol_t *>(_last_reply);
-    PayloadHeader *last_payload =
+    auto *last_payload =
         reinterpret_cast<PayloadHeader *>(&last_reply->payload[0]);
 
     if (payload->seq_number + 1 == last_payload->seq_number) {
@@ -301,7 +300,7 @@ out:
 }
 
 bool MavlinkFTP::_ensure_buffers_exist() {
-  _last_work_buffer_access = hrt_absolute_time();
+  _last_work_buffer_access = absolute_time_us();
 
   if (!_work_buffer1) {
     _work_buffer1 = new char[_work_buffer1_len];
@@ -316,8 +315,7 @@ bool MavlinkFTP::_ensure_buffers_exist() {
 
 /// @brief Sends the specified FTP response message out through mavlink
 void MavlinkFTP::_reply(mavlink_file_transfer_protocol_t *ftp_req) {
-  PayloadHeader *payload =
-      reinterpret_cast<PayloadHeader *>(&ftp_req->payload[0]);
+  auto *payload = reinterpret_cast<PayloadHeader *>(&ftp_req->payload[0]);
 
   // keep a copy of the last sent response ((n)ack), so that if it gets lost and
   // the GCS resends the request, we can simply resend the response. we only
@@ -368,7 +366,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workList(PayloadHeader *payload) {
   struct dirent *result = nullptr;
 
   // move to the requested offset
-  int requested_offset = payload->offset;
+  auto requested_offset = payload->offset;
 
   while (requested_offset-- > 0 && readdir(dp)) {
   }
@@ -513,7 +511,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workOpen(PayloadHeader *payload, int oflag) {
 #endif
 
   uint32_t fileSize = 0;
-  struct stat st;
+  struct stat st {};
 
   if (stat(_work_buffer1, &st) != 0) {
     // fail only if requested open for read
@@ -946,7 +944,7 @@ int MavlinkFTP::_copy_file(const char *src_path, const char *dst_path,
 void MavlinkFTP::send() {
   if (_work_buffer1 || _work_buffer2) {
     // free the work buffers if they are not used for a while
-    if (hrt_elapsed_time(&_last_work_buffer_access) > 2_s) {
+    if ((absolute_time_us() - _last_work_buffer_access) > 2 * 1000 * 1000) {
       if (_work_buffer1) {
         delete[] _work_buffer1;
         _work_buffer1 = nullptr;
@@ -960,7 +958,7 @@ void MavlinkFTP::send() {
 
   } else if (_session_info.fd != -1) {
     // close session without activity
-    if (hrt_elapsed_time(&_last_work_buffer_access) > 10_s) {
+    if ((absolute_time_us() - _last_work_buffer_access) > 10 * 1000 * 1000) {
       ::close(_session_info.fd);
       _session_info.fd = -1;
       _session_info.stream_download = false;
@@ -1030,7 +1028,7 @@ void MavlinkFTP::send() {
     }
 
     if (error_code == kErrNone) {
-      int bytes_read =
+      auto bytes_read =
           ::read(_session_info.fd, &payload->data[0], kMaxDataLength);
 
       if (bytes_read < 0) {
