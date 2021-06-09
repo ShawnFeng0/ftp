@@ -37,10 +37,44 @@
 ///     @author px4dev, Don Gagne <don@thegagnes.com>
 
 #include <dirent.h>
-#include <drivers/drv_hrt.h>
-#include <px4_platform_common/defines.h>
-#include <queue.h>
-#include <systemlib/err.h>
+#include <time.h>
+
+#include <cstdint>
+
+typedef struct {
+  uint8_t target_network;   /*<  Network ID (0 for broadcast)*/
+  uint8_t target_system;    /*<  System ID (0 for broadcast)*/
+  uint8_t target_component; /*<  Component ID (0 for broadcast)*/
+  uint8_t payload[251]; /*<  Variable length payload. The length is defined by
+                           the remaining message length when subtracting the
+                           header and other fields.  The entire content of this
+                           block is opaque unless you understand any the
+                           encoding message_type.  The particular encoding used
+                           can be extension specific and might not always be
+                           documented as part of the mavlink specification.*/
+} mavlink_file_transfer_protocol_t;
+
+// mavlink ftp macro
+#define MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN 254
+#define MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN 251
+
+// mavlink macro
+///< Length of core header (of the comm. layer)
+#define MAVLINK_CORE_HEADER_LEN 9
+///< Length of all header bytes, including core and stx
+#define MAVLINK_NUM_HEADER_BYTES (MAVLINK_CORE_HEADER_LEN + 1)
+#define MAVLINK_NUM_CHECKSUM_BYTES 2
+#define MAVLINK_NUM_NON_PAYLOAD_BYTES \
+  (MAVLINK_NUM_HEADER_BYTES + MAVLINK_NUM_CHECKSUM_BYTES)
+
+class Mavlink {
+ public:
+  size_t get_free_tx_buf() { return 500; }
+};
+
+// TODO:
+static inline void mavlink_msg_file_transfer_protocol_send_struct(
+    mavlink_file_transfer_protocol_t *data) {}
 
 /**
  * Get absolute time in [us] (does not wrap).
@@ -69,18 +103,6 @@ class MavlinkFTP {
    * @param t current time
    */
   void send();
-
-  /// Handle possible FTP message
-  void handle_message(const mavlink_message_t *msg);
-
-  typedef void (*ReceiveMessageFunc_t)(
-      const mavlink_file_transfer_protocol_t *ftp_req, void *worker_data);
-
-  /// @brief Sets up the server to run in unit test mode.
-  ///	@param rcvmsgFunc Function which will be called to handle outgoing
-  ///mavlink messages.
-  ///	@param worker_data Data to pass to worker
-  void set_unittest_worker(ReceiveMessageFunc_t rcvMsgFunc, void *worker_data);
 
   /// @brief This is the payload which is in
   /// mavlink_file_transfer_protocol_t.payload. This needs to be packed, because
@@ -166,10 +188,6 @@ class MavlinkFTP {
   ErrorCode _workRename(PayloadHeader *payload);
   ErrorCode _workCalcFileCRC32(PayloadHeader *payload);
 
-  uint8_t _getServerSystemId(void);
-  uint8_t _getServerComponentId(void);
-  uint8_t _getServerChannel(void);
-
   /**
    * make sure that the working buffers _work_buffer* are allocated
    * @return true if buffers exist, false if allocation failed
@@ -184,9 +202,11 @@ class MavlinkFTP {
       'S';  ///< Identifies Skipped entry from List command
 
   /// @brief Maximum data size in RequestHeader::data
-  static const uint8_t kMaxDataLength =
-      MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN -
-      sizeof(PayloadHeader);
+  static const uint8_t kMaxDataLength = 251 - 16;
+  // TODO:
+  //  static const uint8_t kMaxDataLength =
+  //      MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN -
+  //      sizeof(PayloadHeader);
 
   struct SessionInfo {
     int fd;
@@ -201,8 +221,6 @@ class MavlinkFTP {
   struct SessionInfo _session_info {
   };  ///< Session info, fd=-1 for no active session
 
-  ReceiveMessageFunc_t
-      _utRcvMsgFunc{};  ///< Unit test override for mavlink message sending
   void *_worker_data{nullptr};  ///< Additional parameter to _utRcvMsgFunc;
 
   Mavlink *_mavlink;
@@ -223,11 +241,7 @@ class MavlinkFTP {
   // prepend a root directory to each file/dir access to avoid enumerating the
   // full FS tree (e.g. on Linux). Note that requests can still fall outside of
   // the root dir by using ../..
-#ifdef MAVLINK_FTP_UNIT_TEST
-  static constexpr const char _root_dir[] = "";
-#else
-  static constexpr const char _root_dir[] = PX4_ROOTFSDIR;
-#endif
+  static constexpr const char _root_dir[] = "/";
   static constexpr const int _root_dir_len = sizeof(_root_dir) - 1;
 
   bool _last_reply_valid = false;

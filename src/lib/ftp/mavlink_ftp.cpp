@@ -36,7 +36,6 @@
 
 #include "mavlink_ftp.h"
 
-#include <crc32.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -45,16 +44,8 @@
 
 #include <cstring>
 
-#include "mavlink_tests/mavlink_ftp_test.h"
+#include "crc32/crc32.h"
 #include "ulog/ulog.h"
-
-#ifndef MAVLINK_FTP_UNIT_TEST
-#include "mavlink_main.h"
-#else
-#include <v2.0/standard/mavlink.h>
-#endif
-
-using namespace time_literals;
 
 constexpr const char MavlinkFTP::_root_dir[];
 
@@ -75,67 +66,6 @@ unsigned MavlinkFTP::get_size() const {
 
   } else {
     return 0;
-  }
-}
-
-#ifdef MAVLINK_FTP_UNIT_TEST
-void MavlinkFTP::set_unittest_worker(ReceiveMessageFunc_t rcvMsgFunc,
-                                     void *worker_data) {
-  _utRcvMsgFunc = rcvMsgFunc;
-  _worker_data = worker_data;
-}
-#endif
-
-uint8_t MavlinkFTP::_getServerSystemId() {
-#ifdef MAVLINK_FTP_UNIT_TEST
-  // We use fake ids when unit testing
-  return MavlinkFtpTest::serverSystemId;
-#else
-  // Not unit testing, use the real thing
-  return _mavlink->get_system_id();
-#endif
-}
-
-uint8_t MavlinkFTP::_getServerComponentId() {
-#ifdef MAVLINK_FTP_UNIT_TEST
-  // We use fake ids when unit testing
-  return MavlinkFtpTest::serverComponentId;
-#else
-  // Not unit testing, use the real thing
-  return _mavlink->get_component_id();
-#endif
-}
-
-uint8_t MavlinkFTP::_getServerChannel() {
-#ifdef MAVLINK_FTP_UNIT_TEST
-  // We use fake ids when unit testing
-  return MavlinkFtpTest::serverChannel;
-#else
-  // Not unit testing, use the real thing
-  return _mavlink->get_channel();
-#endif
-}
-
-void MavlinkFTP::handle_message(const mavlink_message_t *msg) {
-  // warnx("MavlinkFTP::handle_message %d %d", buf_size_1, buf_size_2);
-
-  if (msg->msgid == MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL) {
-    mavlink_file_transfer_protocol_t ftp_request;
-    mavlink_msg_file_transfer_protocol_decode(msg, &ftp_request);
-
-#ifdef MAVLINK_FTP_DEBUG
-    PX4_INFO(
-        "FTP: received ftp protocol message target_system: %d "
-        "target_component: %d",
-        ftp_request.target_system, ftp_request.target_component);
-#endif
-
-    if ((ftp_request.target_system == _getServerSystemId() ||
-         ftp_request.target_system == 0) &&
-        (ftp_request.target_component == _getServerComponentId() ||
-         ftp_request.target_component == 0)) {
-      _process_request(&ftp_request, msg->sysid, msg->compid);
-    }
   }
 }
 
@@ -172,19 +102,14 @@ void MavlinkFTP::_process_request(mavlink_file_transfer_protocol_t *ftp_req,
     if (payload->seq_number + 1 == last_payload->seq_number) {
       // this is the same request as the one we replied to last. It means the
       // (n)ack got lost, and the GCS resent the request
-#ifdef MAVLINK_FTP_UNIT_TEST
-      _utRcvMsgFunc(last_reply, _worker_data);
-#else
-      mavlink_msg_file_transfer_protocol_send_struct(_mavlink->get_channel(),
-                                                     last_reply);
-#endif
+      mavlink_msg_file_transfer_protocol_send_struct(last_reply);
       return;
     }
   }
 
 #ifdef MAVLINK_FTP_DEBUG
   LOGGER_INFO("ftp: channel %u opc %u size %u offset %u", _getServerChannel(),
-           payload->opcode, payload->size, payload->offset);
+              payload->opcode, payload->size, payload->offset);
 #endif
 
   switch (payload->opcode) {
@@ -332,13 +257,7 @@ void MavlinkFTP::_reply(mavlink_file_transfer_protocol_t *ftp_req) {
               payload->opcode == kRspAck ? "Ack" : "Nak", payload->seq_number);
 #endif
 
-#ifdef MAVLINK_FTP_UNIT_TEST
-  // Unit test hook is set, call that instead
-  _utRcvMsgFunc(ftp_req, _worker_data);
-#else
-  mavlink_msg_file_transfer_protocol_send_struct(_mavlink->get_channel(),
-                                                 ftp_req);
-#endif
+  mavlink_msg_file_transfer_protocol_send_struct(ftp_req);
 }
 
 /// @brief Responds to a List command
@@ -484,7 +403,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workList(PayloadHeader *payload) {
     strcpy((char *)&payload->data[offset], _work_buffer2);
 #ifdef MAVLINK_FTP_DEBUG
     LOGGER_INFO("FTP: list %s %s", _work_buffer1,
-             (char *)&payload->data[offset - 1]);
+                (char *)&payload->data[offset - 1]);
 #endif
     offset += nameLen + 1;
   }
@@ -526,7 +445,8 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workOpen(PayloadHeader *payload, int oflag) {
   fileSize = st.st_size;
 
   // Set mode to 666 incase oflag has O_CREAT
-  int fd = ::open(_work_buffer1, oflag, PX4_O_MODE_666);
+  int fd = ::open(_work_buffer1, oflag,
+                  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 
   if (fd < 0) {
     return kErrFailErrno;
@@ -972,19 +892,17 @@ void MavlinkFTP::send() {
     return;
   }
 
-#ifndef MAVLINK_FTP_UNIT_TEST
   // Skip send if not enough room
   unsigned max_bytes_to_send = _mavlink->get_free_tx_buf();
+
 #ifdef MAVLINK_FTP_DEBUG
   LOGGER_INFO("MavlinkFTP::send max_bytes_to_send(%d) get_free_tx_buf(%d)",
-           max_bytes_to_send, _mavlink->get_free_tx_buf());
+              max_bytes_to_send, _mavlink->get_free_tx_buf());
 #endif
 
   if (max_bytes_to_send < get_size()) {
     return;
   }
-
-#endif
 
   // Send stream packets until buffer is full
 
