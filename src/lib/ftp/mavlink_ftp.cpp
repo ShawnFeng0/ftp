@@ -36,12 +36,12 @@
 
 #include "mavlink_ftp.h"
 
-#include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 
 #include "crc32/crc32.h"
@@ -282,8 +282,6 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workList(PayloadHeader *payload) {
   LOGGER_INFO("FTP: list %s offset %d", _work_buffer1, payload->offset);
 #endif
 
-  struct dirent *result = nullptr;
-
   // move to the requested offset
   auto requested_offset = payload->offset;
 
@@ -292,7 +290,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workList(PayloadHeader *payload) {
 
   for (;;) {
     errno = 0;
-    result = readdir(dp);
+    struct dirent *result = readdir(dp);
 
     // read the directory entry
     if (result == nullptr) {
@@ -338,7 +336,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workList(PayloadHeader *payload) {
         bool buf_is_ok = ((ret > 0) && (ret < _work_buffer2_len));
 
         if (buf_is_ok) {
-          struct stat st;
+          struct stat st {};
 
           if (stat(_work_buffer2, &st) == 0) {
             fileSize = st.st_size;
@@ -429,7 +427,6 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workOpen(PayloadHeader *payload, int oflag) {
   LOGGER_INFO("FTP: open '%s'", _work_buffer1);
 #endif
 
-  uint32_t fileSize = 0;
   struct stat st {};
 
   if (stat(_work_buffer1, &st) != 0) {
@@ -442,7 +439,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workOpen(PayloadHeader *payload, int oflag) {
     }
   }
 
-  fileSize = st.st_size;
+  uint32_t fileSize = st.st_size;
 
   // Set mode to 666 incase oflag has O_CREAT
   int fd = ::open(_work_buffer1, oflag,
@@ -464,7 +461,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workOpen(PayloadHeader *payload, int oflag) {
 }
 
 /// @brief Responds to a Read command
-MavlinkFTP::ErrorCode MavlinkFTP::_workRead(PayloadHeader *payload) {
+MavlinkFTP::ErrorCode MavlinkFTP::_workRead(PayloadHeader *payload) const {
   if (payload->session != 0 || _session_info.fd < 0) {
     return kErrInvalidSession;
   }
@@ -484,11 +481,11 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workRead(PayloadHeader *payload) {
     return kErrFailErrno;
   }
 
-  int bytes_read = ::read(_session_info.fd, &payload->data[0], kMaxDataLength);
+  auto bytes_read = ::read(_session_info.fd, &payload->data[0], kMaxDataLength);
 
   if (bytes_read < 0) {
     // Negative return indicates error other than eof
-    LOGGER_ERROR("read fail %d", bytes_read);
+    LOGGER_ERROR("read fail %ld", bytes_read);
     return kErrFailErrno;
   }
 
@@ -520,7 +517,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workBurst(PayloadHeader *payload,
 }
 
 /// @brief Responds to a Write command
-MavlinkFTP::ErrorCode MavlinkFTP::_workWrite(PayloadHeader *payload) {
+MavlinkFTP::ErrorCode MavlinkFTP::_workWrite(PayloadHeader *payload) const {
   if (payload->session != 0 && _session_info.fd < 0) {
     return kErrInvalidSession;
   }
@@ -531,12 +528,12 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workWrite(PayloadHeader *payload) {
     return kErrFailErrno;
   }
 
-  int bytes_written =
+  auto bytes_written =
       ::write(_session_info.fd, &payload->data[0], payload->size);
 
   if (bytes_written < 0) {
     // Negative return indicates error other than eof
-    LOGGER_ERROR("write fail %d", bytes_written);
+    LOGGER_ERROR("write fail %ld", bytes_written);
     return kErrFailErrno;
   }
 
@@ -803,23 +800,21 @@ char *MavlinkFTP::_data_as_cstring(PayloadHeader *payload) {
 /// @brief Copy file (with limited space)
 int MavlinkFTP::_copy_file(const char *src_path, const char *dst_path,
                            size_t length) {
-  int src_fd = -1, dst_fd = -1;
-  int op_errno = 0;
-
-  src_fd = ::open(src_path, O_RDONLY);
+  auto src_fd = ::open(src_path, O_RDONLY);
 
   if (src_fd < 0) {
     return -1;
   }
 
-  dst_fd = ::open(dst_path, O_CREAT | O_TRUNC | O_WRONLY
+  auto dst_fd = ::open(dst_path, O_CREAT | O_TRUNC | O_WRONLY
 // POSIX requires the permissions to be supplied if O_CREAT passed
 #ifdef __PX4_POSIX
-                  ,
-                  0666
+                       ,
+                       0666
 #endif
   );
 
+  int op_errno = 0;
   if (dst_fd < 0) {
     op_errno = errno;
     ::close(src_fd);
@@ -914,8 +909,7 @@ void MavlinkFTP::send() {
     ErrorCode error_code = kErrNone;
 
     mavlink_file_transfer_protocol_t ftp_msg;
-    PayloadHeader *payload =
-        reinterpret_cast<PayloadHeader *>(&ftp_msg.payload[0]);
+    auto *payload = reinterpret_cast<PayloadHeader *>(&ftp_msg.payload[0]);
 
     payload->seq_number = _session_info.stream_seq_number;
     payload->session = 0;

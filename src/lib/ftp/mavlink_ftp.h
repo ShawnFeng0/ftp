@@ -37,9 +37,9 @@
 ///     @author px4dev, Don Gagne <don@thegagnes.com>
 
 #include <dirent.h>
-#include <time.h>
 
 #include <cstdint>
+#include <ctime>
 
 typedef struct {
   uint8_t target_network;   /*<  Network ID (0 for broadcast)*/
@@ -95,7 +95,7 @@ static inline uint64_t absolute_time_us() {
 /// MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL message.
 class MavlinkFTP {
  public:
-  MavlinkFTP(Mavlink *mavlink);
+  explicit MavlinkFTP(Mavlink *mavlink);
   ~MavlinkFTP();
 
   /**
@@ -166,7 +166,7 @@ class MavlinkFTP {
   unsigned get_size() const;
 
  private:
-  char *_data_as_cstring(PayloadHeader *payload);
+  static char *_data_as_cstring(PayloadHeader *payload);
 
   void _process_request(mavlink_file_transfer_protocol_t *ftp_req,
                         uint8_t target_system_id, uint8_t target_comp_id);
@@ -175,10 +175,10 @@ class MavlinkFTP {
 
   ErrorCode _workList(PayloadHeader *payload);
   ErrorCode _workOpen(PayloadHeader *payload, int oflag);
-  ErrorCode _workRead(PayloadHeader *payload);
+  ErrorCode _workRead(PayloadHeader *payload) const;
   ErrorCode _workBurst(PayloadHeader *payload, uint8_t target_system_id,
                        uint8_t target_component_id);
-  ErrorCode _workWrite(PayloadHeader *payload);
+  ErrorCode _workWrite(PayloadHeader *payload) const;
   ErrorCode _workTerminate(PayloadHeader *payload);
   ErrorCode _workReset(PayloadHeader *payload);
   ErrorCode _workRemoveDirectory(PayloadHeader *payload);
@@ -221,8 +221,6 @@ class MavlinkFTP {
   struct SessionInfo _session_info {
   };  ///< Session info, fd=-1 for no active session
 
-  void *_worker_data{nullptr};  ///< Additional parameter to _utRcvMsgFunc;
-
   Mavlink *_mavlink;
 
   /* do not allow copying this class */
@@ -248,7 +246,4 @@ class MavlinkFTP {
   uint8_t _last_reply[MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN -
                       MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN +
                       sizeof(PayloadHeader) + sizeof(uint32_t)]{};
-
-  // Mavlink test needs to be able to call send
-  friend class MavlinkFtpTest;
 };
