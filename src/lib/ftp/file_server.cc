@@ -48,6 +48,8 @@
 #include "crc32.h"
 #include "ulog/ulog.h"
 
+#define FTP_DEBUG
+
 /**
  * Get absolute time in [us] (does not wrap).
  */
@@ -87,6 +89,17 @@ void FileServer::ProcessRequest(Payload *payload) {
 
   ErrorCode errorCode = kErrNone;
 
+#ifdef FTP_DEBUG
+  LOGGER_TOKEN(payload->size);
+  LOGGER_TOKEN(payload->offset);
+  LOGGER_TOKEN(payload->opcode);
+  LOGGER_TOKEN(payload->session);
+  LOGGER_TOKEN(payload->seq_number);
+  LOGGER_TOKEN(payload->req_opcode);
+  LOGGER_TOKEN(payload->burst_complete);
+  LOGGER_TOKEN(data_as_cstring(payload));
+#endif
+
   if (!ensure_buffers_exist()) {
     LOGGER_ERROR("Failed to allocate buffers");
     errorCode = kErrFailErrno;
@@ -117,9 +130,9 @@ void FileServer::ProcessRequest(Payload *payload) {
     }
   }
 
-#ifdef MAVLINK_FTP_DEBUG
-  LOGGER_INFO("ftp: channel %u opc %u size %u offset %u", _getServerChannel(),
-              payload->opcode, payload->size, payload->offset);
+#ifdef FTP_DEBUG
+  LOGGER_INFO("ftp: opc %u size %u offset %u", payload->opcode, payload->size,
+              payload->offset);
 #endif
 
   switch (payload->opcode) {
@@ -257,15 +270,14 @@ void FileServer::Reply(Payload *payload) {
     memcpy(last_reply_, payload, sizeof(Payload) + payload->size);
   }
 
-#ifdef MAVLINK_FTP_DEBUG
+#ifdef FTP_DEBUG
   LOGGER_INFO("FTP: %s seq_number: %d",
               payload->opcode == kRspAck ? "Ack" : "Nak", payload->seq_number);
 #endif
 
   if (write_callback_) {
-    size_t result =
-        write_callback_(user_data_, reinterpret_cast<const char *>(payload),
-                        sizeof(Payload) + payload->size);
+    write_callback_(user_data_, reinterpret_cast<const char *>(payload),
+                    sizeof(Payload) + payload->size);
   }
 }
 
@@ -287,8 +299,8 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
     return kErrFileNotFound;
   }
 
-#ifdef MAVLINK_FTP_DEBUG
-  LOGGER_INFO("FTP: list %s offset %d", _work_buffer1, payload->offset);
+#ifdef FTP_DEBUG
+  LOGGER_INFO("FTP: list %s offset %d", work_buffer1_, payload->offset);
 #endif
 
   // move to the requested offset
@@ -408,8 +420,8 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
     // Move the data into the buffer
     payload->data[offset++] = direntType;
     strcpy((char *)&payload->data[offset], work_buffer2_);
-#ifdef MAVLINK_FTP_DEBUG
-    LOGGER_INFO("FTP: list %s %s", _work_buffer1,
+#ifdef FTP_DEBUG
+    LOGGER_INFO("FTP: list %s %s", work_buffer1_,
                 (char *)&payload->data[offset - 1]);
 #endif
     offset += nameLen + 1;
@@ -432,8 +444,8 @@ FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
   strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
           work_buffer1_len_ - root_directory_.length());
 
-#ifdef MAVLINK_FTP_DEBUG
-  LOGGER_INFO("FTP: open '%s'", _work_buffer1);
+#ifdef FTP_DEBUG
+  LOGGER_INFO("FTP: open '%s'", work_buffer1_);
 #endif
 
   struct stat st {};
@@ -475,7 +487,7 @@ FileServer::ErrorCode FileServer::WorkRead(Payload *payload) const {
     return kErrInvalidSession;
   }
 
-#ifdef MAVLINK_FTP_DEBUG
+#ifdef FTP_DEBUG
   LOGGER_INFO("FTP: read offset:%d", payload->offset);
 #endif
 
@@ -509,7 +521,7 @@ FileServer::ErrorCode FileServer::WorkBurst(Payload *payload) {
     return kErrInvalidSession;
   }
 
-#ifdef MAVLINK_FTP_DEBUG
+#ifdef FTP_DEBUG
   LOGGER_INFO("FTP: burst offset:%d", payload->offset);
 #endif
   // Setup for streaming sends
@@ -894,9 +906,8 @@ void FileServer::Send() {
   // Skip send if not enough room
   unsigned max_bytes_to_send = get_size();
 
-#ifdef MAVLINK_FTP_DEBUG
-  LOGGER_INFO("MavlinkFTP::send max_bytes_to_send(%d) get_free_tx_buf(%d)",
-              max_bytes_to_send, _mavlink->get_free_tx_buf());
+#ifdef FTP_DEBUG
+  LOGGER_INFO("MavlinkFTP::send max_bytes_to_send(%d)", max_bytes_to_send);
 #endif
 
   if (max_bytes_to_send < get_size()) {
@@ -922,14 +933,14 @@ void FileServer::Send() {
     payload->offset = session_info_.stream_offset;
     session_info_.stream_seq_number++;
 
-#ifdef MAVLINK_FTP_DEBUG
-    LOGGER_INFO("stream send: offset %d", _session_info.stream_offset);
+#ifdef FTP_DEBUG
+    LOGGER_INFO("stream send: offset %d", session_info_.stream_offset);
 #endif
 
     // We have to test seek past EOF ourselves, lseek will allow seek past EOF
     if (session_info_.stream_offset >= session_info_.file_size) {
       error_code = kErrEOF;
-#ifdef MAVLINK_FTP_DEBUG
+#ifdef FTP_DEBUG
       LOGGER_INFO("stream download: sending Nak EOF");
 #endif
     }
@@ -937,7 +948,7 @@ void FileServer::Send() {
     if (error_code == kErrNone) {
       if (lseek(session_info_.fd, payload->offset, SEEK_SET) < 0) {
         error_code = kErrFailErrno;
-#ifdef MAVLINK_FTP_DEBUG
+#ifdef FTP_DEBUG
         LOGGER_WARN("stream download: seek fail");
 #endif
       }
@@ -950,7 +961,7 @@ void FileServer::Send() {
       if (bytes_read < 0) {
         // Negative return indicates error other than eof
         error_code = kErrFailErrno;
-#ifdef MAVLINK_FTP_DEBUG
+#ifdef FTP_DEBUG
         LOGGER_WARN("stream download: read fail");
 #endif
 
