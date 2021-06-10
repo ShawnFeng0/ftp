@@ -60,6 +60,15 @@ MavlinkFTP::~MavlinkFTP() {
 }
 
 unsigned MavlinkFTP::get_size() const {
+// mavlink macro
+///< Length of core header (of the comm. layer)
+#define MAVLINK_CORE_HEADER_LEN 9
+///< Length of all header bytes, including core and stx
+#define MAVLINK_NUM_HEADER_BYTES (MAVLINK_CORE_HEADER_LEN + 1)
+#define MAVLINK_NUM_CHECKSUM_BYTES 2
+#define MAVLINK_NUM_NON_PAYLOAD_BYTES \
+  (MAVLINK_NUM_HEADER_BYTES + MAVLINK_NUM_CHECKSUM_BYTES)
+
   if (_session_info.stream_download) {
     return MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN +
            MAVLINK_NUM_NON_PAYLOAD_BYTES;
@@ -70,11 +79,8 @@ unsigned MavlinkFTP::get_size() const {
 }
 
 /// @brief Processes an FTP message
-void MavlinkFTP::_process_request(mavlink_file_transfer_protocol_t *ftp_req,
-                                  uint8_t target_system_id,
-                                  uint8_t target_comp_id) {
+void MavlinkFTP::_process_request(PayloadHeader *payload) {
   bool stream_send = false;
-  auto *payload = reinterpret_cast<PayloadHeader *>(&ftp_req->payload[0]);
 
   ErrorCode errorCode = kErrNone;
 
@@ -94,15 +100,16 @@ void MavlinkFTP::_process_request(mavlink_file_transfer_protocol_t *ftp_req,
   // check the sequence number: if this is a resent request, resend the last
   // response
   if (_last_reply_valid) {
-    auto *last_reply =
-        reinterpret_cast<mavlink_file_transfer_protocol_t *>(_last_reply);
-    auto *last_payload =
-        reinterpret_cast<PayloadHeader *>(&last_reply->payload[0]);
+    auto *last_payload = reinterpret_cast<PayloadHeader *>(_last_reply);
 
     if (payload->seq_number + 1 == last_payload->seq_number) {
       // this is the same request as the one we replied to last. It means the
       // (n)ack got lost, and the GCS resent the request
-      mavlink_msg_file_transfer_protocol_send_struct(last_reply);
+      if (_mavlink) {
+        size_t result;
+        result = _mavlink->Write(reinterpret_cast<const char *>(last_payload),
+                                 sizeof(PayloadHeader) + last_payload->size);
+      }
       return;
     }
   }
@@ -145,7 +152,7 @@ void MavlinkFTP::_process_request(mavlink_file_transfer_protocol_t *ftp_req,
       break;
 
     case kCmdBurstReadFile:
-      errorCode = _workBurst(payload, target_system_id, target_comp_id);
+      errorCode = _workBurst(payload);
       stream_send = true;
       break;
 
@@ -217,10 +224,7 @@ out:
   // we need to Nack.
   if (!stream_send || errorCode != kErrNone) {
     // respond to the request
-    ftp_req->target_system = target_system_id;
-    ftp_req->target_network = 0;
-    ftp_req->target_component = target_comp_id;
-    _reply(ftp_req);
+    _reply(payload);
   }
 }
 
@@ -239,9 +243,7 @@ bool MavlinkFTP::_ensure_buffers_exist() {
 }
 
 /// @brief Sends the specified FTP response message out through mavlink
-void MavlinkFTP::_reply(mavlink_file_transfer_protocol_t *ftp_req) {
-  auto *payload = reinterpret_cast<PayloadHeader *>(&ftp_req->payload[0]);
-
+void MavlinkFTP::_reply(PayloadHeader *payload) {
   // keep a copy of the last sent response ((n)ack), so that if it gets lost and
   // the GCS resends the request, we can simply resend the response. we only
   // keep small responses to reduce RAM usage and avoid large memcpy's. The
@@ -249,7 +251,7 @@ void MavlinkFTP::_reply(mavlink_file_transfer_protocol_t *ftp_req) {
   // ok to reexecute them if a response gets lost
   if (payload->size <= sizeof(uint32_t)) {
     _last_reply_valid = true;
-    memcpy(_last_reply, ftp_req, sizeof(_last_reply));
+    memcpy(_last_reply, payload, sizeof(PayloadHeader) + payload->size);
   }
 
 #ifdef MAVLINK_FTP_DEBUG
@@ -257,7 +259,11 @@ void MavlinkFTP::_reply(mavlink_file_transfer_protocol_t *ftp_req) {
               payload->opcode == kRspAck ? "Ack" : "Nak", payload->seq_number);
 #endif
 
-  mavlink_msg_file_transfer_protocol_send_struct(ftp_req);
+  if (_mavlink) {
+    size_t result;
+    result = _mavlink->Write(reinterpret_cast<const char *>(payload),
+                             sizeof(PayloadHeader) + payload->size);
+  }
 }
 
 /// @brief Responds to a List command
@@ -495,9 +501,7 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workRead(PayloadHeader *payload) const {
 }
 
 /// @brief Responds to a Stream command
-MavlinkFTP::ErrorCode MavlinkFTP::_workBurst(PayloadHeader *payload,
-                                             uint8_t target_system_id,
-                                             uint8_t target_component_id) {
+MavlinkFTP::ErrorCode MavlinkFTP::_workBurst(PayloadHeader *payload) {
   if (payload->session != 0 && _session_info.fd < 0) {
     return kErrInvalidSession;
   }
@@ -510,8 +514,6 @@ MavlinkFTP::ErrorCode MavlinkFTP::_workBurst(PayloadHeader *payload,
   _session_info.stream_offset = payload->offset;
   _session_info.stream_chunk_transmitted = 0;
   _session_info.stream_seq_number = payload->seq_number + 1;
-  _session_info.stream_target_system_id = target_system_id;
-  _session_info.stream_target_component_id = target_component_id;
 
   return kErrNone;
 }
@@ -908,8 +910,8 @@ void MavlinkFTP::send() {
 
     ErrorCode error_code = kErrNone;
 
-    mavlink_file_transfer_protocol_t ftp_msg;
-    auto *payload = reinterpret_cast<PayloadHeader *>(&ftp_msg.payload[0]);
+    uint8_t payload_buffer[sizeof(PayloadHeader) + kMaxDataLength];
+    auto *payload = reinterpret_cast<PayloadHeader *>(&payload_buffer[0]);
 
     payload->seq_number = _session_info.stream_seq_number;
     payload->session = 0;
@@ -996,9 +998,6 @@ void MavlinkFTP::send() {
 #endif
     }
 
-    ftp_msg.target_system = _session_info.stream_target_system_id;
-    ftp_msg.target_network = 0;
-    ftp_msg.target_component = _session_info.stream_target_component_id;
-    _reply(&ftp_msg);
+    _reply(payload);
   } while (more_data);
 }

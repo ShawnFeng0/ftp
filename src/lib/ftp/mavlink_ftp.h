@@ -41,40 +41,34 @@
 #include <cstdint>
 #include <ctime>
 
-typedef struct {
-  uint8_t target_network;   /*<  Network ID (0 for broadcast)*/
-  uint8_t target_system;    /*<  System ID (0 for broadcast)*/
-  uint8_t target_component; /*<  Component ID (0 for broadcast)*/
-  uint8_t payload[251]; /*<  Variable length payload. The length is defined by
-                           the remaining message length when subtracting the
-                           header and other fields.  The entire content of this
-                           block is opaque unless you understand any the
-                           encoding message_type.  The particular encoding used
-                           can be extension specific and might not always be
-                           documented as part of the mavlink specification.*/
-} mavlink_file_transfer_protocol_t;
+/// @brief This is the payload which is in
+/// mavlink_file_transfer_protocol_t.payload. This needs to be packed, because
+/// it's typecasted from mavlink_file_transfer_protocol_t.payload, which
+/// starts at a 3 byte offset, causing an unaligned access to seq_number and
+/// offset
+struct __attribute__((__packed__)) PayloadHeader {
+  uint16_t seq_number;  ///< sequence number for message
+  uint8_t session;      ///< Session id for read and write commands
+  uint8_t opcode;       ///< Command opcode
+  uint8_t size;         ///< Size of data
+  uint8_t req_opcode;   ///< Request opcode returned in kRspAck, kRspNak message
+  uint8_t burst_complete;  ///< Only used if req_opcode=kCmdBurstReadFile - 1:
+                           ///< set of burst packets complete, 0: More burst
+                           ///< packets coming.
+  uint8_t padding;         ///< 32 bit aligment padding
+  uint32_t offset;         ///< Offsets for List and Read commands
+  uint8_t data[];          ///< command data, varies by Opcode
+};
 
 // mavlink ftp macro
 #define MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN 254
 #define MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN 251
 
-// mavlink macro
-///< Length of core header (of the comm. layer)
-#define MAVLINK_CORE_HEADER_LEN 9
-///< Length of all header bytes, including core and stx
-#define MAVLINK_NUM_HEADER_BYTES (MAVLINK_CORE_HEADER_LEN + 1)
-#define MAVLINK_NUM_CHECKSUM_BYTES 2
-#define MAVLINK_NUM_NON_PAYLOAD_BYTES \
-  (MAVLINK_NUM_HEADER_BYTES + MAVLINK_NUM_CHECKSUM_BYTES)
-
 class Mavlink {
  public:
-  size_t get_free_tx_buf() { return 500; }
+  size_t Write(const char *data, size_t len) { return len; }
+  size_t get_free_tx_buf() { return 300; }
 };
-
-// TODO:
-static inline void mavlink_msg_file_transfer_protocol_send_struct(
-    mavlink_file_transfer_protocol_t *data) {}
 
 /**
  * Get absolute time in [us] (does not wrap).
@@ -103,26 +97,6 @@ class MavlinkFTP {
    * @param t current time
    */
   void send();
-
-  /// @brief This is the payload which is in
-  /// mavlink_file_transfer_protocol_t.payload. This needs to be packed, because
-  /// it's typecasted from mavlink_file_transfer_protocol_t.payload, which
-  /// starts at a 3 byte offset, causing an unaligned access to seq_number and
-  /// offset
-  struct __attribute__((__packed__)) PayloadHeader {
-    uint16_t seq_number;  ///< sequence number for message
-    uint8_t session;      ///< Session id for read and write commands
-    uint8_t opcode;       ///< Command opcode
-    uint8_t size;         ///< Size of data
-    uint8_t
-        req_opcode;  ///< Request opcode returned in kRspAck, kRspNak message
-    uint8_t burst_complete;  ///< Only used if req_opcode=kCmdBurstReadFile - 1:
-                             ///< set of burst packets complete, 0: More burst
-                             ///< packets coming.
-    uint8_t padding;         ///< 32 bit aligment padding
-    uint32_t offset;         ///< Offsets for List and Read commands
-    uint8_t data[];          ///< command data, varies by Opcode
-  };
 
   /// @brief Command opcodes
   enum Opcode : uint8_t {
@@ -168,16 +142,15 @@ class MavlinkFTP {
  private:
   static char *_data_as_cstring(PayloadHeader *payload);
 
-  void _process_request(mavlink_file_transfer_protocol_t *ftp_req,
-                        uint8_t target_system_id, uint8_t target_comp_id);
-  void _reply(mavlink_file_transfer_protocol_t *ftp_req);
+  void _process_request(PayloadHeader *payload);
+  void _reply(PayloadHeader *payload);
+
   int _copy_file(const char *src_path, const char *dst_path, size_t length);
 
   ErrorCode _workList(PayloadHeader *payload);
   ErrorCode _workOpen(PayloadHeader *payload, int oflag);
   ErrorCode _workRead(PayloadHeader *payload) const;
-  ErrorCode _workBurst(PayloadHeader *payload, uint8_t target_system_id,
-                       uint8_t target_component_id);
+  ErrorCode _workBurst(PayloadHeader *payload);
   ErrorCode _workWrite(PayloadHeader *payload) const;
   ErrorCode _workTerminate(PayloadHeader *payload);
   ErrorCode _workReset(PayloadHeader *payload);
@@ -202,11 +175,9 @@ class MavlinkFTP {
       'S';  ///< Identifies Skipped entry from List command
 
   /// @brief Maximum data size in RequestHeader::data
-  static const uint8_t kMaxDataLength = 251 - 16;
-  // TODO:
-  //  static const uint8_t kMaxDataLength =
-  //      MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN -
-  //      sizeof(PayloadHeader);
+  static const uint8_t kMaxDataLength =
+      MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN -
+      sizeof(PayloadHeader);
 
   struct SessionInfo {
     int fd;
@@ -214,8 +185,6 @@ class MavlinkFTP {
     bool stream_download;
     uint32_t stream_offset;
     uint16_t stream_seq_number;
-    uint8_t stream_target_system_id;
-    uint8_t stream_target_component_id;
     unsigned stream_chunk_transmitted;
   };
   struct SessionInfo _session_info {
@@ -243,7 +212,5 @@ class MavlinkFTP {
   static constexpr const int _root_dir_len = sizeof(_root_dir) - 1;
 
   bool _last_reply_valid = false;
-  uint8_t _last_reply[MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN -
-                      MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN +
-                      sizeof(PayloadHeader) + sizeof(uint32_t)]{};
+  uint8_t _last_reply[sizeof(PayloadHeader) + sizeof(uint32_t)]{};
 };
