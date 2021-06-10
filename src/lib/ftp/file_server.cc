@@ -62,30 +62,30 @@ static inline uint64_t absolute_time_us() {
 
 using namespace uftp;
 
-constexpr const char FileServer::_root_dir[];
+constexpr const char FileServer::root_dir_[];
 
 FileServer::FileServer(void *user_data, WriteCallback write_callback)
     : user_data_(user_data), write_callback_(write_callback) {
   // initialize session
-  _session_info.fd = -1;
+  session_info_.fd = -1;
 }
 
 FileServer::~FileServer() {
-  delete[] _work_buffer1;
-  delete[] _work_buffer2;
+  delete[] work_buffer1_;
+  delete[] work_buffer2_;
 }
 
 unsigned FileServer::get_size() const {
-  return _session_info.stream_download ? kMaxPacketLength : 0;
+  return session_info_.stream_download ? kMaxPacketLength : 0;
 }
 
 /// @brief Processes an FTP message
-void FileServer::_process_request(PayloadHeader *payload) {
+void FileServer::ProcessRequest(Payload *payload) {
   bool stream_send = false;
 
   ErrorCode errorCode = kErrNone;
 
-  if (!_ensure_buffers_exist()) {
+  if (!ensure_buffers_exist()) {
     LOGGER_ERROR("Failed to allocate buffers");
     errorCode = kErrFailErrno;
     errno = ENOMEM;
@@ -100,17 +100,16 @@ void FileServer::_process_request(PayloadHeader *payload) {
 
   // check the sequence number: if this is a resent request, resend the last
   // response
-  if (_last_reply_valid) {
-    auto *last_payload = reinterpret_cast<PayloadHeader *>(_last_reply);
+  if (last_reply_valid_) {
+    auto *last_payload = reinterpret_cast<Payload *>(last_reply_);
 
     if (payload->seq_number + 1 == last_payload->seq_number) {
       // this is the same request as the one we replied to last. It means the
       // (n)ack got lost, and the GCS resent the request
       if (write_callback_) {
-        size_t result;
-        result = write_callback_(user_data_,
-                                 reinterpret_cast<const char *>(last_payload),
-                                 sizeof(PayloadHeader) + last_payload->size);
+        write_callback_(user_data_,
+                        reinterpret_cast<const char *>(last_payload),
+                        sizeof(Payload) + last_payload->size);
       }
       return;
     }
@@ -126,64 +125,64 @@ void FileServer::_process_request(PayloadHeader *payload) {
       break;
 
     case kCmdTerminateSession:
-      errorCode = _workTerminate(payload);
+      errorCode = WorkTerminate(payload);
       break;
 
     case kCmdResetSessions:
-      errorCode = _workReset(payload);
+      errorCode = WorkReset(payload);
       break;
 
     case kCmdListDirectory:
-      errorCode = _workList(payload);
+      errorCode = WorkList(payload);
       break;
 
     case kCmdOpenFileRO:
-      errorCode = _workOpen(payload, O_RDONLY);
+      errorCode = WorkOpen(payload, O_RDONLY);
       break;
 
     case kCmdCreateFile:
-      errorCode = _workOpen(payload, O_CREAT | O_TRUNC | O_WRONLY);
+      errorCode = WorkOpen(payload, O_CREAT | O_TRUNC | O_WRONLY);
       break;
 
     case kCmdOpenFileWO:
-      errorCode = _workOpen(payload, O_CREAT | O_WRONLY);
+      errorCode = WorkOpen(payload, O_CREAT | O_WRONLY);
       break;
 
     case kCmdReadFile:
-      errorCode = _workRead(payload);
+      errorCode = WorkRead(payload);
       break;
 
     case kCmdBurstReadFile:
-      errorCode = _workBurst(payload);
+      errorCode = WorkBurst(payload);
       stream_send = true;
       break;
 
     case kCmdWriteFile:
-      errorCode = _workWrite(payload);
+      errorCode = WorkWrite(payload);
       break;
 
     case kCmdRemoveFile:
-      errorCode = _workRemoveFile(payload);
+      errorCode = WorkRemoveFile(payload);
       break;
 
     case kCmdRename:
-      errorCode = _workRename(payload);
+      errorCode = WorkRename(payload);
       break;
 
     case kCmdTruncateFile:
-      errorCode = _workTruncateFile(payload);
+      errorCode = WorkTruncateFile(payload);
       break;
 
     case kCmdCreateDirectory:
-      errorCode = _workCreateDirectory(payload);
+      errorCode = WorkCreateDirectory(payload);
       break;
 
     case kCmdRemoveDirectory:
-      errorCode = _workRemoveDirectory(payload);
+      errorCode = WorkRemoveDirectory(payload);
       break;
 
     case kCmdCalcFileCRC32:
-      errorCode = _workCalcFileCRC32(payload);
+      errorCode = WorkCalcFileCrc32(payload);
       break;
 
     default:
@@ -220,40 +219,40 @@ out:
     }
   }
 
-  _last_reply_valid = false;
+  last_reply_valid_ = false;
 
   // Stream download replies are sent through mavlink stream mechanism. Unless
   // we need to Nack.
   if (!stream_send || errorCode != kErrNone) {
     // respond to the request
-    _reply(payload);
+    Reply(payload);
   }
 }
 
-bool FileServer::_ensure_buffers_exist() {
-  _last_work_buffer_access = absolute_time_us();
+bool FileServer::ensure_buffers_exist() {
+  last_work_buffer_access_ = absolute_time_us();
 
-  if (!_work_buffer1) {
-    _work_buffer1 = new char[_work_buffer1_len];
+  if (!work_buffer1_) {
+    work_buffer1_ = new char[work_buffer1_len_];
   }
 
-  if (!_work_buffer2) {
-    _work_buffer2 = new char[_work_buffer2_len];
+  if (!work_buffer2_) {
+    work_buffer2_ = new char[work_buffer2_len_];
   }
 
-  return _work_buffer1 && _work_buffer2;
+  return work_buffer1_ && work_buffer2_;
 }
 
 /// @brief Sends the specified FTP response message out through mavlink
-void FileServer::_reply(PayloadHeader *payload) {
+void FileServer::Reply(Payload *payload) {
   // keep a copy of the last sent response ((n)ack), so that if it gets lost and
   // the GCS resends the request, we can simply resend the response. we only
   // keep small responses to reduce RAM usage and avoid large memcpy's. The
   // larger responses are all data retrievals without side-effects, meaning it's
   // ok to reexecute them if a response gets lost
   if (payload->size <= sizeof(uint32_t)) {
-    _last_reply_valid = true;
-    memcpy(_last_reply, payload, sizeof(PayloadHeader) + payload->size);
+    last_reply_valid_ = true;
+    memcpy(last_reply_, payload, sizeof(Payload) + payload->size);
   }
 
 #ifdef MAVLINK_FTP_DEBUG
@@ -264,25 +263,25 @@ void FileServer::_reply(PayloadHeader *payload) {
   if (write_callback_) {
     size_t result =
         write_callback_(user_data_, reinterpret_cast<const char *>(payload),
-                        sizeof(PayloadHeader) + payload->size);
+                        sizeof(Payload) + payload->size);
   }
 }
 
 /// @brief Responds to a List command
-FileServer::ErrorCode FileServer::_workList(PayloadHeader *payload) {
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer1_len - _root_dir_len);
+FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer1_len_ - root_dir_len_);
   // ensure termination
-  _work_buffer1[_work_buffer1_len - 1] = '\0';
+  work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
   ErrorCode errorCode = kErrNone;
   unsigned offset = 0;
 
-  DIR *dp = opendir(_work_buffer1);
+  DIR *dp = opendir(work_buffer1_);
 
   if (dp == nullptr) {
-    LOGGER_WARN("File open failed %s", _work_buffer1);
+    LOGGER_WARN("File open failed %s", work_buffer1_);
     return kErrFileNotFound;
   }
 
@@ -339,14 +338,14 @@ FileServer::ErrorCode FileServer::_workList(PayloadHeader *payload) {
 #endif
         // For files we get the file size as well
         direntType = kDirentFile;
-        int ret = snprintf(_work_buffer2, _work_buffer2_len, "%s/%s",
-                           _work_buffer1, result->d_name);
-        bool buf_is_ok = ((ret > 0) && (ret < _work_buffer2_len));
+        int ret = snprintf(work_buffer2_, work_buffer2_len_, "%s/%s",
+                           work_buffer1_, result->d_name);
+        bool buf_is_ok = ((ret > 0) && (ret < work_buffer2_len_));
 
         if (buf_is_ok) {
           struct stat st {};
 
-          if (stat(_work_buffer2, &st) == 0) {
+          if (stat(work_buffer2_, &st) == 0) {
             fileSize = st.st_size;
           }
         }
@@ -378,25 +377,25 @@ FileServer::ErrorCode FileServer::_workList(PayloadHeader *payload) {
 
     if (direntType == kDirentSkip) {
       // Skip send only dirent identifier
-      _work_buffer2[0] = '\0';
+      work_buffer2_[0] = '\0';
 
     } else if (direntType == kDirentFile) {
       // Files send filename and file length
-      int ret = snprintf(_work_buffer2, _work_buffer2_len, "%s\t%d",
+      int ret = snprintf(work_buffer2_, work_buffer2_len_, "%s\t%d",
                          result->d_name, fileSize);
-      bool buf_is_ok = ((ret > 0) && (ret < _work_buffer2_len));
+      bool buf_is_ok = ((ret > 0) && (ret < work_buffer2_len_));
 
       if (!buf_is_ok) {
-        _work_buffer2[_work_buffer2_len - 1] = '\0';
+        work_buffer2_[work_buffer2_len_ - 1] = '\0';
       }
 
     } else {
       // Everything else just sends name
-      strncpy(_work_buffer2, result->d_name, _work_buffer2_len);
-      _work_buffer2[_work_buffer2_len - 1] = '\0';
+      strncpy(work_buffer2_, result->d_name, work_buffer2_len_);
+      work_buffer2_[work_buffer2_len_ - 1] = '\0';
     }
 
-    size_t nameLen = strlen(_work_buffer2);
+    size_t nameLen = strlen(work_buffer2_);
 
     // Do we have room for the name, the one char directory identifier and the
     // null terminator?
@@ -406,7 +405,7 @@ FileServer::ErrorCode FileServer::_workList(PayloadHeader *payload) {
 
     // Move the data into the buffer
     payload->data[offset++] = direntType;
-    strcpy((char *)&payload->data[offset], _work_buffer2);
+    strcpy((char *)&payload->data[offset], work_buffer2_);
 #ifdef MAVLINK_FTP_DEBUG
     LOGGER_INFO("FTP: list %s %s", _work_buffer1,
                 (char *)&payload->data[offset - 1]);
@@ -421,15 +420,15 @@ FileServer::ErrorCode FileServer::_workList(PayloadHeader *payload) {
 }
 
 /// @brief Responds to an Open command
-FileServer::ErrorCode FileServer::_workOpen(PayloadHeader *payload, int oflag) {
-  if (_session_info.fd >= 0) {
+FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
+  if (session_info_.fd >= 0) {
     LOGGER_ERROR("FTP: Open failed - out of sessions\n");
     return kErrNoSessionsAvailable;
   }
 
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer1_len - _root_dir_len);
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer1_len_ - root_dir_len_);
 
 #ifdef MAVLINK_FTP_DEBUG
   LOGGER_INFO("FTP: open '%s'", _work_buffer1);
@@ -437,7 +436,7 @@ FileServer::ErrorCode FileServer::_workOpen(PayloadHeader *payload, int oflag) {
 
   struct stat st {};
 
-  if (stat(_work_buffer1, &st) != 0) {
+  if (stat(work_buffer1_, &st) != 0) {
     // fail only if requested open for read
     if (oflag & O_RDONLY) {
       return kErrFailErrno;
@@ -450,16 +449,16 @@ FileServer::ErrorCode FileServer::_workOpen(PayloadHeader *payload, int oflag) {
   uint32_t fileSize = st.st_size;
 
   // Set mode to 666 incase oflag has O_CREAT
-  int fd = ::open(_work_buffer1, oflag,
+  int fd = ::open(work_buffer1_, oflag,
                   S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 
   if (fd < 0) {
     return kErrFailErrno;
   }
 
-  _session_info.fd = fd;
-  _session_info.file_size = fileSize;
-  _session_info.stream_download = false;
+  session_info_.fd = fd;
+  session_info_.file_size = fileSize;
+  session_info_.stream_download = false;
 
   payload->session = 0;
   payload->size = sizeof(uint32_t);
@@ -469,8 +468,8 @@ FileServer::ErrorCode FileServer::_workOpen(PayloadHeader *payload, int oflag) {
 }
 
 /// @brief Responds to a Read command
-FileServer::ErrorCode FileServer::_workRead(PayloadHeader *payload) const {
-  if (payload->session != 0 || _session_info.fd < 0) {
+FileServer::ErrorCode FileServer::WorkRead(Payload *payload) const {
+  if (payload->session != 0 || session_info_.fd < 0) {
     return kErrInvalidSession;
   }
 
@@ -479,17 +478,17 @@ FileServer::ErrorCode FileServer::_workRead(PayloadHeader *payload) const {
 #endif
 
   // We have to test seek past EOF ourselves, lseek will allow seek past EOF
-  if (payload->offset >= _session_info.file_size) {
+  if (payload->offset >= session_info_.file_size) {
     LOGGER_ERROR("request past EOF");
     return kErrEOF;
   }
 
-  if (lseek(_session_info.fd, payload->offset, SEEK_SET) < 0) {
+  if (lseek(session_info_.fd, payload->offset, SEEK_SET) < 0) {
     LOGGER_ERROR("seek fail");
     return kErrFailErrno;
   }
 
-  auto bytes_read = ::read(_session_info.fd, &payload->data[0], kMaxDataLength);
+  auto bytes_read = ::read(session_info_.fd, &payload->data[0], kMaxDataLength);
 
   if (bytes_read < 0) {
     // Negative return indicates error other than eof
@@ -503,8 +502,8 @@ FileServer::ErrorCode FileServer::_workRead(PayloadHeader *payload) const {
 }
 
 /// @brief Responds to a Stream command
-FileServer::ErrorCode FileServer::_workBurst(PayloadHeader *payload) {
-  if (payload->session != 0 && _session_info.fd < 0) {
+FileServer::ErrorCode FileServer::WorkBurst(Payload *payload) {
+  if (payload->session != 0 && session_info_.fd < 0) {
     return kErrInvalidSession;
   }
 
@@ -512,28 +511,28 @@ FileServer::ErrorCode FileServer::_workBurst(PayloadHeader *payload) {
   LOGGER_INFO("FTP: burst offset:%d", payload->offset);
 #endif
   // Setup for streaming sends
-  _session_info.stream_download = true;
-  _session_info.stream_offset = payload->offset;
-  _session_info.stream_chunk_transmitted = 0;
-  _session_info.stream_seq_number = payload->seq_number + 1;
+  session_info_.stream_download = true;
+  session_info_.stream_offset = payload->offset;
+  session_info_.stream_chunk_transmitted = 0;
+  session_info_.stream_seq_number = payload->seq_number + 1;
 
   return kErrNone;
 }
 
 /// @brief Responds to a Write command
-FileServer::ErrorCode FileServer::_workWrite(PayloadHeader *payload) const {
-  if (payload->session != 0 && _session_info.fd < 0) {
+FileServer::ErrorCode FileServer::WorkWrite(Payload *payload) const {
+  if (payload->session != 0 && session_info_.fd < 0) {
     return kErrInvalidSession;
   }
 
-  if (lseek(_session_info.fd, payload->offset, SEEK_SET) < 0) {
+  if (lseek(session_info_.fd, payload->offset, SEEK_SET) < 0) {
     // Unable to see to the specified location
     LOGGER_ERROR("seek fail");
     return kErrFailErrno;
   }
 
   auto bytes_written =
-      ::write(_session_info.fd, &payload->data[0], payload->size);
+      ::write(session_info_.fd, &payload->data[0], payload->size);
 
   if (bytes_written < 0) {
     // Negative return indicates error other than eof
@@ -548,14 +547,14 @@ FileServer::ErrorCode FileServer::_workWrite(PayloadHeader *payload) const {
 }
 
 /// @brief Responds to a RemoveFile command
-FileServer::ErrorCode FileServer::_workRemoveFile(PayloadHeader *payload) {
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer1_len - _root_dir_len);
+FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer1_len_ - root_dir_len_);
   // ensure termination
-  _work_buffer1[_work_buffer1_len - 1] = '\0';
+  work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
-  if (unlink(_work_buffer1) == 0) {
+  if (unlink(work_buffer1_) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -565,12 +564,12 @@ FileServer::ErrorCode FileServer::_workRemoveFile(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a TruncateFile command
-FileServer::ErrorCode FileServer::_workTruncateFile(PayloadHeader *payload) {
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer1_len - _root_dir_len);
+FileServer::ErrorCode FileServer::WorkTruncateFile(Payload *payload) {
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer1_len_ - root_dir_len_);
   // ensure termination
-  _work_buffer1[_work_buffer1_len - 1] = '\0';
+  work_buffer1_[work_buffer1_len_ - 1] = '\0';
   payload->size = 0;
 
 #ifdef __PX4_NUTTX
@@ -648,7 +647,7 @@ FileServer::ErrorCode FileServer::_workTruncateFile(PayloadHeader *payload) {
   }
 
 #else
-  int ret = truncate(_work_buffer1, payload->offset);
+  int ret = truncate(work_buffer1_, payload->offset);
 
   if (ret == 0) {
     return kErrNone;
@@ -659,14 +658,14 @@ FileServer::ErrorCode FileServer::_workTruncateFile(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a Terminate command
-FileServer::ErrorCode FileServer::_workTerminate(PayloadHeader *payload) {
-  if (payload->session != 0 || _session_info.fd < 0) {
+FileServer::ErrorCode FileServer::WorkTerminate(Payload *payload) {
+  if (payload->session != 0 || session_info_.fd < 0) {
     return kErrInvalidSession;
   }
 
-  ::close(_session_info.fd);
-  _session_info.fd = -1;
-  _session_info.stream_download = false;
+  ::close(session_info_.fd);
+  session_info_.fd = -1;
+  session_info_.stream_download = false;
 
   payload->size = 0;
 
@@ -674,11 +673,11 @@ FileServer::ErrorCode FileServer::_workTerminate(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a Reset command
-FileServer::ErrorCode FileServer::_workReset(PayloadHeader *payload) {
-  if (_session_info.fd != -1) {
-    ::close(_session_info.fd);
-    _session_info.fd = -1;
-    _session_info.stream_download = false;
+FileServer::ErrorCode FileServer::WorkReset(Payload *payload) {
+  if (session_info_.fd != -1) {
+    ::close(session_info_.fd);
+    session_info_.fd = -1;
+    session_info_.stream_download = false;
   }
 
   payload->size = 0;
@@ -687,8 +686,8 @@ FileServer::ErrorCode FileServer::_workReset(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a Rename command
-FileServer::ErrorCode FileServer::_workRename(PayloadHeader *payload) {
-  char *ptr = _data_as_cstring(payload);
+FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
+  char *ptr = data_as_cstring(payload);
   size_t oldpath_sz = strlen(ptr);
 
   if (oldpath_sz == payload->size) {
@@ -697,17 +696,17 @@ FileServer::ErrorCode FileServer::_workRename(PayloadHeader *payload) {
     return kErrFailErrno;
   }
 
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, ptr,
-          _work_buffer1_len - _root_dir_len);
-  _work_buffer1[_work_buffer1_len - 1] = '\0';  // ensure termination
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, ptr,
+          work_buffer1_len_ - root_dir_len_);
+  work_buffer1_[work_buffer1_len_ - 1] = '\0';  // ensure termination
 
-  strncpy(_work_buffer2, _root_dir, _work_buffer2_len);
-  strncpy(_work_buffer2 + _root_dir_len, ptr + oldpath_sz + 1,
-          _work_buffer2_len - _root_dir_len);
-  _work_buffer2[_work_buffer2_len - 1] = '\0';  // ensure termination
+  strncpy(work_buffer2_, root_dir_, work_buffer2_len_);
+  strncpy(work_buffer2_ + root_dir_len_, ptr + oldpath_sz + 1,
+          work_buffer2_len_ - root_dir_len_);
+  work_buffer2_[work_buffer2_len_ - 1] = '\0';  // ensure termination
 
-  if (rename(_work_buffer1, _work_buffer2) == 0) {
+  if (rename(work_buffer1_, work_buffer2_) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -717,14 +716,14 @@ FileServer::ErrorCode FileServer::_workRename(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a RemoveDirectory command
-FileServer::ErrorCode FileServer::_workRemoveDirectory(PayloadHeader *payload) {
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer1_len - _root_dir_len);
+FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer1_len_ - root_dir_len_);
   // ensure termination
-  _work_buffer1[_work_buffer1_len - 1] = '\0';
+  work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
-  if (rmdir(_work_buffer1) == 0) {
+  if (rmdir(work_buffer1_) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -734,14 +733,14 @@ FileServer::ErrorCode FileServer::_workRemoveDirectory(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a CreateDirectory command
-FileServer::ErrorCode FileServer::_workCreateDirectory(PayloadHeader *payload) {
-  strncpy(_work_buffer1, _root_dir, _work_buffer1_len);
-  strncpy(_work_buffer1 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer1_len - _root_dir_len);
+FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
+  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
+  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer1_len_ - root_dir_len_);
   // ensure termination
-  _work_buffer1[_work_buffer1_len - 1] = '\0';
+  work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
-  if (mkdir(_work_buffer1, S_IRWXU | S_IRWXG | S_IRWXO) == 0) {
+  if (mkdir(work_buffer1_, S_IRWXU | S_IRWXG | S_IRWXO) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -751,23 +750,22 @@ FileServer::ErrorCode FileServer::_workCreateDirectory(PayloadHeader *payload) {
 }
 
 /// @brief Responds to a CalcFileCRC32 command
-FileServer::ErrorCode FileServer::_workCalcFileCRC32(PayloadHeader *payload) {
-  uint32_t checksum = 0;
-  ssize_t bytes_read;
-  strncpy(_work_buffer2, _root_dir, _work_buffer2_len);
-  strncpy(_work_buffer2 + _root_dir_len, _data_as_cstring(payload),
-          _work_buffer2_len - _root_dir_len);
+FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
+  strncpy(work_buffer2_, root_dir_, work_buffer2_len_);
+  strncpy(work_buffer2_ + root_dir_len_, data_as_cstring(payload),
+          work_buffer2_len_ - root_dir_len_);
   // ensure termination
-  _work_buffer2[_work_buffer2_len - 1] = '\0';
+  work_buffer2_[work_buffer2_len_ - 1] = '\0';
 
-  int fd = ::open(_work_buffer2, O_RDONLY);
-
+  int fd = ::open(work_buffer2_, O_RDONLY);
   if (fd < 0) {
     return kErrFailErrno;
   }
 
+  uint32_t checksum = 0;
+  ssize_t bytes_read;
   do {
-    bytes_read = ::read(fd, _work_buffer2, _work_buffer2_len);
+    bytes_read = ::read(fd, work_buffer2_, work_buffer2_len_);
 
     if (bytes_read < 0) {
       int r_errno = errno;
@@ -776,8 +774,8 @@ FileServer::ErrorCode FileServer::_workCalcFileCRC32(PayloadHeader *payload) {
       return kErrFailErrno;
     }
 
-    checksum = uftp_crc32part((uint8_t *)_work_buffer2, bytes_read, checksum);
-  } while (bytes_read == _work_buffer2_len);
+    checksum = uftp_crc32part((uint8_t *)work_buffer2_, bytes_read, checksum);
+  } while (bytes_read == work_buffer2_len_);
 
   ::close(fd);
 
@@ -788,7 +786,7 @@ FileServer::ErrorCode FileServer::_workCalcFileCRC32(PayloadHeader *payload) {
 
 /// @brief Guarantees that the payload data is null terminated.
 ///     @return Returns a pointer to the payload data as a char *
-char *FileServer::_data_as_cstring(PayloadHeader *payload) {
+char *FileServer::data_as_cstring(Payload *payload) {
   // guarantee nul termination
   if (payload->size < kMaxDataLength) {
     payload->data[payload->size] = '\0';
@@ -802,7 +800,7 @@ char *FileServer::_data_as_cstring(PayloadHeader *payload) {
 }
 
 /// @brief Copy file (with limited space)
-int FileServer::_copy_file(const char *src_path, const char *dst_path,
+int FileServer::CopyFile(const char *src_path, const char *dst_path,
                            size_t length) {
   auto src_fd = ::open(src_path, O_RDONLY);
 
@@ -828,9 +826,9 @@ int FileServer::_copy_file(const char *src_path, const char *dst_path,
 
   while (length > 0) {
     ssize_t bytes_read, bytes_written;
-    size_t blen = (length > _work_buffer2_len) ? _work_buffer2_len : length;
+    size_t blen = (length > work_buffer2_len_) ? work_buffer2_len_ : length;
 
-    bytes_read = ::read(src_fd, _work_buffer2, blen);
+    bytes_read = ::read(src_fd, work_buffer2_, blen);
 
     if (bytes_read == 0) {
       // EOF
@@ -842,7 +840,7 @@ int FileServer::_copy_file(const char *src_path, const char *dst_path,
       break;
     }
 
-    bytes_written = ::write(dst_fd, _work_buffer2, bytes_read);
+    bytes_written = ::write(dst_fd, work_buffer2_, bytes_read);
 
     if (bytes_written != bytes_read) {
       LOGGER_ERROR("cp: short write");
@@ -860,34 +858,34 @@ int FileServer::_copy_file(const char *src_path, const char *dst_path,
   return (length > 0) ? -1 : 0;
 }
 
-void FileServer::send() {
-  if (_work_buffer1 || _work_buffer2) {
+void FileServer::Send() {
+  if (work_buffer1_ || work_buffer2_) {
     // free the work buffers if they are not used for a while
-    if ((absolute_time_us() - _last_work_buffer_access) > 2 * 1000 * 1000) {
-      if (_work_buffer1) {
-        delete[] _work_buffer1;
-        _work_buffer1 = nullptr;
+    if ((absolute_time_us() - last_work_buffer_access_) > 2 * 1000 * 1000) {
+      if (work_buffer1_) {
+        delete[] work_buffer1_;
+        work_buffer1_ = nullptr;
       }
 
-      if (_work_buffer2) {
-        delete[] _work_buffer2;
-        _work_buffer2 = nullptr;
+      if (work_buffer2_) {
+        delete[] work_buffer2_;
+        work_buffer2_ = nullptr;
       }
     }
 
-  } else if (_session_info.fd != -1) {
+  } else if (session_info_.fd != -1) {
     // close session without activity
-    if ((absolute_time_us() - _last_work_buffer_access) > 10 * 1000 * 1000) {
-      ::close(_session_info.fd);
-      _session_info.fd = -1;
-      _session_info.stream_download = false;
-      _last_reply_valid = false;
+    if ((absolute_time_us() - last_work_buffer_access_) > 10 * 1000 * 1000) {
+      ::close(session_info_.fd);
+      session_info_.fd = -1;
+      session_info_.stream_download = false;
+      last_reply_valid_ = false;
       LOGGER_WARN("Session was closed without activity");
     }
   }
 
   // Anything to stream?
-  if (!_session_info.stream_download) {
+  if (!session_info_.stream_download) {
     return;
   }
 
@@ -912,22 +910,22 @@ void FileServer::send() {
 
     ErrorCode error_code = kErrNone;
 
-    uint8_t payload_buffer[sizeof(PayloadHeader) + kMaxDataLength];
-    auto *payload = reinterpret_cast<PayloadHeader *>(&payload_buffer[0]);
+    uint8_t payload_buffer[sizeof(Payload) + kMaxDataLength];
+    auto *payload = reinterpret_cast<Payload *>(&payload_buffer[0]);
 
-    payload->seq_number = _session_info.stream_seq_number;
+    payload->seq_number = session_info_.stream_seq_number;
     payload->session = 0;
     payload->opcode = kRspAck;
     payload->req_opcode = kCmdBurstReadFile;
-    payload->offset = _session_info.stream_offset;
-    _session_info.stream_seq_number++;
+    payload->offset = session_info_.stream_offset;
+    session_info_.stream_seq_number++;
 
 #ifdef MAVLINK_FTP_DEBUG
     LOGGER_INFO("stream send: offset %d", _session_info.stream_offset);
 #endif
 
     // We have to test seek past EOF ourselves, lseek will allow seek past EOF
-    if (_session_info.stream_offset >= _session_info.file_size) {
+    if (session_info_.stream_offset >= session_info_.file_size) {
       error_code = kErrEOF;
 #ifdef MAVLINK_FTP_DEBUG
       LOGGER_INFO("stream download: sending Nak EOF");
@@ -935,7 +933,7 @@ void FileServer::send() {
     }
 
     if (error_code == kErrNone) {
-      if (lseek(_session_info.fd, payload->offset, SEEK_SET) < 0) {
+      if (lseek(session_info_.fd, payload->offset, SEEK_SET) < 0) {
         error_code = kErrFailErrno;
 #ifdef MAVLINK_FTP_DEBUG
         LOGGER_WARN("stream download: seek fail");
@@ -945,7 +943,7 @@ void FileServer::send() {
 
     if (error_code == kErrNone) {
       auto bytes_read =
-          ::read(_session_info.fd, &payload->data[0], kMaxDataLength);
+          ::read(session_info_.fd, &payload->data[0], kMaxDataLength);
 
       if (bytes_read < 0) {
         // Negative return indicates error other than eof
@@ -956,8 +954,8 @@ void FileServer::send() {
 
       } else {
         payload->size = bytes_read;
-        _session_info.stream_offset += bytes_read;
-        _session_info.stream_chunk_transmitted += bytes_read;
+        session_info_.stream_offset += bytes_read;
+        session_info_.stream_chunk_transmitted += bytes_read;
       }
     }
 
@@ -974,7 +972,7 @@ void FileServer::send() {
         payload->data[1] = r_errno;
       }
 
-      _session_info.stream_download = false;
+      session_info_.stream_download = false;
 
     } else {
 #ifndef MAVLINK_FTP_UNIT_TEST
@@ -983,10 +981,10 @@ void FileServer::send() {
         more_data = false;
 
         /* perform transfers in 35K chunks - this is determined empirical */
-        if (_session_info.stream_chunk_transmitted > 35000) {
+        if (session_info_.stream_chunk_transmitted > 35000) {
           payload->burst_complete = true;
-          _session_info.stream_download = false;
-          _session_info.stream_chunk_transmitted = 0;
+          session_info_.stream_download = false;
+          session_info_.stream_chunk_transmitted = 0;
         }
 
       } else {
@@ -1000,6 +998,6 @@ void FileServer::send() {
 #endif
     }
 
-    _reply(payload);
+    Reply(payload);
   } while (more_data);
 }

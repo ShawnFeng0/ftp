@@ -1,40 +1,4 @@
-/****************************************************************************
- *
- *   Copyright (c) 2014, 2015 PX4 Development Team. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name PX4 nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- ****************************************************************************/
-
 #pragma once
-
-/// @file mavlink_ftp.h
-///     @author px4dev, Don Gagne <don@thegagnes.com>
 
 #include <dirent.h>
 
@@ -48,7 +12,7 @@ namespace uftp {
 /// it's typecasted from mavlink_file_transfer_protocol_t.payload, which
 /// starts at a 3 byte offset, causing an unaligned access to seq_number and
 /// offset
-struct __attribute__((__packed__)) PayloadHeader {
+struct Payload {
   uint32_t size;        ///< Size of data
   uint32_t offset;      ///< Offsets for List and Read commands
   uint16_t seq_number;  ///< sequence number for message
@@ -73,7 +37,8 @@ class FileServer {
    * Handle sending of messages. Call this regularly at a fixed frequency.
    * @param t current time
    */
-  void send();
+  void Send();
+  void ProcessRequest(Payload *payload);
 
   /// @brief Command opcodes
   enum Opcode : uint8_t {
@@ -117,32 +82,31 @@ class FileServer {
   unsigned get_size() const;
 
  private:
-  static char *_data_as_cstring(PayloadHeader *payload);
+  static char *data_as_cstring(Payload *payload);
 
-  void _process_request(PayloadHeader *payload);
-  void _reply(PayloadHeader *payload);
+  void Reply(Payload *payload);
 
-  int _copy_file(const char *src_path, const char *dst_path, size_t length);
+  int CopyFile(const char *src_path, const char *dst_path, size_t length);
 
-  ErrorCode _workList(PayloadHeader *payload);
-  ErrorCode _workOpen(PayloadHeader *payload, int oflag);
-  ErrorCode _workRead(PayloadHeader *payload) const;
-  ErrorCode _workBurst(PayloadHeader *payload);
-  ErrorCode _workWrite(PayloadHeader *payload) const;
-  ErrorCode _workTerminate(PayloadHeader *payload);
-  ErrorCode _workReset(PayloadHeader *payload);
-  ErrorCode _workRemoveDirectory(PayloadHeader *payload);
-  ErrorCode _workCreateDirectory(PayloadHeader *payload);
-  ErrorCode _workRemoveFile(PayloadHeader *payload);
-  ErrorCode _workTruncateFile(PayloadHeader *payload);
-  ErrorCode _workRename(PayloadHeader *payload);
-  ErrorCode _workCalcFileCRC32(PayloadHeader *payload);
+  ErrorCode WorkList(Payload *payload);
+  ErrorCode WorkOpen(Payload *payload, int oflag);
+  ErrorCode WorkRead(Payload *payload) const;
+  ErrorCode WorkBurst(Payload *payload);
+  ErrorCode WorkWrite(Payload *payload) const;
+  ErrorCode WorkTerminate(Payload *payload);
+  ErrorCode WorkReset(Payload *payload);
+  ErrorCode WorkRemoveDirectory(Payload *payload);
+  ErrorCode WorkCreateDirectory(Payload *payload);
+  ErrorCode WorkRemoveFile(Payload *payload);
+  ErrorCode WorkTruncateFile(Payload *payload);
+  ErrorCode WorkRename(Payload *payload);
+  ErrorCode WorkCalcFileCrc32(Payload *payload);
 
   /**
    * make sure that the working buffers _work_buffer* are allocated
    * @return true if buffers exist, false if allocation failed
    */
-  bool _ensure_buffers_exist();
+  bool ensure_buffers_exist();
 
   static const char kDirentFile =
       'F';  ///< Identifies File returned from List command
@@ -154,8 +118,7 @@ class FileServer {
   static constexpr size_t kMaxPacketLength = 251;
 
   /// @brief Maximum data size in RequestHeader::data
-  static constexpr size_t kMaxDataLength =
-      kMaxPacketLength - sizeof(PayloadHeader);
+  static constexpr size_t kMaxDataLength = kMaxPacketLength - sizeof(Payload);
 
   struct SessionInfo {
     int fd;
@@ -164,9 +127,7 @@ class FileServer {
     uint32_t stream_offset;
     uint16_t stream_seq_number;
     unsigned stream_chunk_transmitted;
-  };
-  struct SessionInfo _session_info {
-  };  ///< Session info, fd=-1 for no active session
+  } session_info_;  ///< Session info, fd=-1 for no active session
 
   void *user_data_;
   WriteCallback write_callback_;
@@ -177,21 +138,21 @@ class FileServer {
 
   /* work buffers: they're allocated as soon as we get the first request (lazy,
    * since FTP is rarely used) */
-  char *_work_buffer1{nullptr};
-  static constexpr int _work_buffer1_len = kMaxDataLength;
-  char *_work_buffer2{nullptr};
-  static constexpr int _work_buffer2_len = 256;
-  uint64_t _last_work_buffer_access{
+  char *work_buffer1_{nullptr};
+  static constexpr int work_buffer1_len_ = kMaxDataLength;
+  char *work_buffer2_{nullptr};
+  static constexpr int work_buffer2_len_ = 256;
+  uint64_t last_work_buffer_access_{
       0};  ///< timestamp when the buffers were last accessed
 
   // prepend a root directory to each file/dir access to avoid enumerating the
   // full FS tree (e.g. on Linux). Note that requests can still fall outside of
   // the root dir by using ../..
-  static constexpr const char _root_dir[] = "/";
-  static constexpr const int _root_dir_len = sizeof(_root_dir) - 1;
+  static constexpr const char root_dir_[] = "/";
+  static constexpr const int root_dir_len_ = sizeof(root_dir_) - 1;
 
-  bool _last_reply_valid = false;
-  uint8_t _last_reply[sizeof(PayloadHeader) + sizeof(uint32_t)]{};
+  bool last_reply_valid_ = false;
+  uint8_t last_reply_[sizeof(Payload) + sizeof(uint32_t)]{};
 };
 
 }  // namespace uftp
