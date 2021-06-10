@@ -55,25 +55,25 @@ extern "C" {
 #endif
 
 /****************************************************************************
- * Name: crc32part
+ * Name: uftp_crc32part
  *
  * Description:
  *   Continue CRC calculation on a part of the buffer.
  *
  ****************************************************************************/
 
-EXTERN uint32_t crc32part(const uint8_t *src, size_t len,
+EXTERN uint32_t uftp_crc32part(const uint8_t *src, size_t len,
 			  uint32_t crc32val);
 
 /****************************************************************************
- * Name: crc32
+ * Name: uftp_crc32
  *
  * Description:
  *   Return a 32-bit CRC of the contents of the 'src' buffer, length 'len'
  *
  ****************************************************************************/
 
-EXTERN uint32_t crc32(const uint8_t *src, size_t len);
+EXTERN uint32_t uftp_crc32(const uint8_t *src, size_t len);
 
 #undef EXTERN
 #ifdef __cplusplus

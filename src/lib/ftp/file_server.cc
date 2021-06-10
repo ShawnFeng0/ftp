@@ -44,7 +44,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "crc32/crc32.h"
+#include "crc32.h"
 #include "ulog/ulog.h"
 
 /**
@@ -59,6 +59,8 @@ static inline uint64_t absolute_time_us() {
 
   return result;
 }
+
+using namespace uftp;
 
 constexpr const char FileServer::_root_dir[];
 
@@ -774,7 +776,7 @@ FileServer::ErrorCode FileServer::_workCalcFileCRC32(PayloadHeader *payload) {
       return kErrFailErrno;
     }
 
-    checksum = crc32part((uint8_t *)_work_buffer2, bytes_read, checksum);
+    checksum = uftp_crc32part((uint8_t *)_work_buffer2, bytes_read, checksum);
   } while (bytes_read == _work_buffer2_len);
 
   ::close(fd);

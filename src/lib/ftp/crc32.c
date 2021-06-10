@@ -93,14 +93,14 @@ static const uint32_t crc32_tab[] = {
  * Public Functions
  ************************************************************************************************/
 /************************************************************************************************
- * Name: crc32part
+ * Name: uftp_crc32part
  *
  * Description:
  *   Continue CRC calculation on a part of the buffer.
  *
  ************************************************************************************************/
 
-uint32_t crc32part(FAR const uint8_t *src, size_t len, uint32_t crc32val)
+uint32_t uftp_crc32part(FAR const uint8_t *src, size_t len, uint32_t crc32val)
 {
 	size_t i;
 
@@ -112,14 +112,14 @@ uint32_t crc32part(FAR const uint8_t *src, size_t len, uint32_t crc32val)
 }
 
 /************************************************************************************************
- * Name: crc32
+ * Name: uftp_crc32
  *
  * Description:
  *   Return a 32-bit CRC of the contents of the 'src' buffer, length 'len'
  *
  ************************************************************************************************/
 
-uint32_t crc32(FAR const uint8_t *src, size_t len)
+uint32_t uftp_crc32(FAR const uint8_t *src, size_t len)
 {
-	return crc32part(src, len, 0);
+	return uftp_crc32part(src, len, 0);
 }

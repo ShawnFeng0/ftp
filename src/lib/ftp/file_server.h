@@ -41,6 +41,8 @@
 #include <cstdint>
 #include <ctime>
 
+namespace uftp {
+
 /// @brief This is the payload which is in
 /// mavlink_file_transfer_protocol_t.payload. This needs to be packed, because
 /// it's typecasted from mavlink_file_transfer_protocol_t.payload, which
@@ -191,3 +193,5 @@ class FileServer {
   bool _last_reply_valid = false;
   uint8_t _last_reply[sizeof(PayloadHeader) + sizeof(uint32_t)]{};
 };
+
+}  // namespace uftp
