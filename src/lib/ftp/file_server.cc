@@ -1,36 +1,3 @@
-/****************************************************************************
- *
- *   Copyright (c) 2014-2020 PX4 Development Team. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name PX4 nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- ****************************************************************************/
-
 /// @file mavlink_ftp.cpp
 ///	@author px4dev, Don Gagne <don@thegagnes.com>
 
@@ -89,15 +56,10 @@ void FileServer::ProcessRequest(Payload *payload) {
 
   ErrorCode errorCode = kErrNone;
 
+  auto payload_str = payload->to_string();
+
 #ifdef FTP_DEBUG
-  LOGGER_TOKEN(payload->size);
-  LOGGER_TOKEN(payload->offset);
-  LOGGER_TOKEN(payload->opcode);
-  LOGGER_TOKEN(payload->session);
-  LOGGER_TOKEN(payload->seq_number);
-  LOGGER_TOKEN(payload->req_opcode);
-  LOGGER_TOKEN(payload->burst_complete);
-  LOGGER_TOKEN(data_as_cstring(payload));
+  LOGGER_TOKEN(payload_str.c_str());
 #endif
 
   if (!ensure_buffers_exist()) {
@@ -284,7 +246,7 @@ void FileServer::Reply(Payload *payload) {
 /// @brief Responds to a List command
 FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
   strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
@@ -441,7 +403,7 @@ FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
   }
 
   strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer1_len_ - root_directory_.length());
 
 #ifdef FTP_DEBUG
@@ -563,7 +525,7 @@ FileServer::ErrorCode FileServer::WorkWrite(Payload *payload) const {
 /// @brief Responds to a RemoveFile command
 FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
   strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
@@ -580,87 +542,12 @@ FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
 /// @brief Responds to a TruncateFile command
 FileServer::ErrorCode FileServer::WorkTruncateFile(Payload *payload) {
   strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
   payload->size = 0;
 
-#ifdef __PX4_NUTTX
-
-  // emulate truncate(_work_buffer1, payload->offset) by
-  // copying to temp and overwrite with O_TRUNC flag (NuttX does not support
-  // truncate()).
-  const char temp_file[] = PX4_STORAGEDIR "/.trunc.tmp";
-
-  struct stat st;
-
-  if (stat(_work_buffer1, &st) != 0) {
-    return kErrFailErrno;
-  }
-
-  if (!S_ISREG(st.st_mode)) {
-    errno = EISDIR;
-    return kErrFailErrno;
-  }
-
-  // check perms allow us to write (not romfs)
-  if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH))) {
-    errno = EROFS;
-    return kErrFailErrno;
-  }
-
-  if (payload->offset == (unsigned)st.st_size) {
-    // nothing to do
-    return kErrNone;
-
-  } else if (payload->offset == 0) {
-    // 1: truncate all data
-    int fd = ::open(_work_buffer1, O_TRUNC | O_WRONLY);
-
-    if (fd < 0) {
-      return kErrFailErrno;
-    }
-
-    ::close(fd);
-    return kErrNone;
-
-  } else if (payload->offset > (unsigned)st.st_size) {
-    // 2: extend file
-    int fd = ::open(_work_buffer1, O_WRONLY);
-
-    if (fd < 0) {
-      return kErrFailErrno;
-    }
-
-    if (lseek(fd, payload->offset - 1, SEEK_SET) < 0) {
-      ::close(fd);
-      return kErrFailErrno;
-    }
-
-    bool ok = 1 == ::write(fd, "", 1);
-    ::close(fd);
-
-    return (ok) ? kErrNone : kErrFailErrno;
-
-  } else {
-    // 3: truncate
-    if (_copy_file(_work_buffer1, temp_file, payload->offset) != 0) {
-      return kErrFailErrno;
-    }
-
-    if (_copy_file(temp_file, _work_buffer1, payload->offset) != 0) {
-      return kErrFailErrno;
-    }
-
-    if (::unlink(temp_file) != 0) {
-      return kErrFailErrno;
-    }
-
-    return kErrNone;
-  }
-
-#else
   int ret = truncate(work_buffer1_, payload->offset);
 
   if (ret == 0) {
@@ -668,7 +555,6 @@ FileServer::ErrorCode FileServer::WorkTruncateFile(Payload *payload) {
   }
 
   return kErrFailErrno;
-#endif /* __PX4_NUTTX */
 }
 
 /// @brief Responds to a Terminate command
@@ -701,7 +587,7 @@ FileServer::ErrorCode FileServer::WorkReset(Payload *payload) {
 
 /// @brief Responds to a Rename command
 FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
-  char *ptr = data_as_cstring(payload);
+  char *ptr = payload->data_as_c_str();
   size_t oldpath_sz = strlen(ptr);
 
   if (oldpath_sz == payload->size) {
@@ -732,7 +618,7 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
 /// @brief Responds to a RemoveDirectory command
 FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
   strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
@@ -749,7 +635,7 @@ FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
 /// @brief Responds to a CreateDirectory command
 FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
   strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
@@ -766,7 +652,7 @@ FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
 /// @brief Responds to a CalcFileCRC32 command
 FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
   strncpy(work_buffer2_, root_directory_.c_str(), work_buffer2_len_);
-  strncpy(work_buffer2_ + root_directory_.length(), data_as_cstring(payload),
+  strncpy(work_buffer2_ + root_directory_.length(), payload->data_as_c_str(),
           work_buffer2_len_ - root_directory_.length());
   // ensure termination
   work_buffer2_[work_buffer2_len_ - 1] = '\0';
@@ -796,21 +682,6 @@ FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
   payload->size = sizeof(uint32_t);
   std::memcpy(payload->data, &checksum, payload->size);
   return kErrNone;
-}
-
-/// @brief Guarantees that the payload data is null terminated.
-///     @return Returns a pointer to the payload data as a char *
-char *FileServer::data_as_cstring(Payload *payload) {
-  // guarantee nul termination
-  if (payload->size < kMaxDataLength) {
-    payload->data[payload->size] = '\0';
-
-  } else {
-    payload->data[kMaxDataLength - 1] = '\0';
-  }
-
-  // and return data
-  return (char *)&(payload->data[0]);
 }
 
 /// @brief Copy file (with limited space)

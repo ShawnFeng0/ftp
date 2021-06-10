@@ -24,6 +24,28 @@ struct Payload {
                            ///< set of burst packets complete, 0: More burst
                            ///< packets coming.
   uint8_t data[];          ///< command data, varies by Opcode
+
+  /// @brief Guarantees that the payload data is null terminated.
+  ///     @return Returns a pointer to the payload data as a char *
+  char *data_as_c_str() {
+    // guarantee nul termination
+    data[size] = '\0';
+    // and return data
+    return (char *)&(data[0]);
+  }
+
+  std::string to_string() {
+    std::string result;
+    result += "size:" + std::to_string(size) + " ";
+    result += "offset:" + std::to_string(offset) + " ";
+    result += "seq_number:" + std::to_string(seq_number) + " ";
+    result += "session:" + std::to_string(session) + " ";
+    result += "opcode:" + std::to_string(opcode) + " ";
+    result += "req_opcode:" + std::to_string(req_opcode) + " ";
+    result += "burst_complete:" + std::to_string(burst_complete) + " ";
+    result += "data:" + std::string(data_as_c_str()) + " ";
+    return result;
+  }
 };
 
 class FileServer {
@@ -83,9 +105,12 @@ class FileServer {
 
   unsigned get_size() const;
 
- private:
-  static char *data_as_cstring(Payload *payload);
+  static constexpr size_t kMaxPacketLength = 251;
 
+  /// @brief Maximum data size in RequestHeader::data
+  static constexpr size_t kMaxDataLength = kMaxPacketLength - sizeof(Payload);
+
+ private:
   void Reply(Payload *payload);
 
   int CopyFile(const char *src_path, const char *dst_path, size_t length);
@@ -116,11 +141,6 @@ class FileServer {
       'D';  ///< Identifies Directory returned from List command
   static const char kDirentSkip =
       'S';  ///< Identifies Skipped entry from List command
-
-  static constexpr size_t kMaxPacketLength = 251;
-
-  /// @brief Maximum data size in RequestHeader::data
-  static constexpr size_t kMaxDataLength = kMaxPacketLength - sizeof(Payload);
 
   struct SessionInfo {
     int fd;
