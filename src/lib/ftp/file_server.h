@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <ctime>
+#include <string>
 
 namespace uftp {
 
@@ -30,7 +31,8 @@ class FileServer {
   typedef size_t (*WriteCallback)(void *user_data, const char *data,
                                   size_t len);
 
-  explicit FileServer(void *user_data, WriteCallback write_callback);
+  explicit FileServer(std::string root_directory, void *user_data,
+                      WriteCallback write_callback);
   ~FileServer();
 
   /**
@@ -127,7 +129,7 @@ class FileServer {
     uint32_t stream_offset;
     uint16_t stream_seq_number;
     unsigned stream_chunk_transmitted;
-  } session_info_;  ///< Session info, fd=-1 for no active session
+  } session_info_{};  ///< Session info, fd=-1 for no active session
 
   void *user_data_;
   WriteCallback write_callback_;
@@ -148,8 +150,7 @@ class FileServer {
   // prepend a root directory to each file/dir access to avoid enumerating the
   // full FS tree (e.g. on Linux). Note that requests can still fall outside of
   // the root dir by using ../..
-  static constexpr const char root_dir_[] = "/";
-  static constexpr const int root_dir_len_ = sizeof(root_dir_) - 1;
+  const std::string root_directory_;
 
   bool last_reply_valid_ = false;
   uint8_t last_reply_[sizeof(Payload) + sizeof(uint32_t)]{};

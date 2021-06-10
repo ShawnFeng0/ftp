@@ -43,6 +43,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 #include "crc32.h"
 #include "ulog/ulog.h"
@@ -62,10 +63,11 @@ static inline uint64_t absolute_time_us() {
 
 using namespace uftp;
 
-constexpr const char FileServer::root_dir_[];
-
-FileServer::FileServer(void *user_data, WriteCallback write_callback)
-    : user_data_(user_data), write_callback_(write_callback) {
+FileServer::FileServer(std::string root_directory, void *user_data,
+                       WriteCallback write_callback)
+    : root_directory_(std::move(root_directory)),
+      user_data_(user_data),
+      write_callback_(write_callback) {
   // initialize session
   session_info_.fd = -1;
 }
@@ -269,9 +271,9 @@ void FileServer::Reply(Payload *payload) {
 
 /// @brief Responds to a List command
 FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
@@ -426,9 +428,9 @@ FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
     return kErrNoSessionsAvailable;
   }
 
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer1_len_ - root_directory_.length());
 
 #ifdef MAVLINK_FTP_DEBUG
   LOGGER_INFO("FTP: open '%s'", _work_buffer1);
@@ -548,9 +550,9 @@ FileServer::ErrorCode FileServer::WorkWrite(Payload *payload) const {
 
 /// @brief Responds to a RemoveFile command
 FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
@@ -565,9 +567,9 @@ FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
 
 /// @brief Responds to a TruncateFile command
 FileServer::ErrorCode FileServer::WorkTruncateFile(Payload *payload) {
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
   payload->size = 0;
@@ -696,14 +698,14 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
     return kErrFailErrno;
   }
 
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, ptr,
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), ptr,
+          work_buffer1_len_ - root_directory_.length());
   work_buffer1_[work_buffer1_len_ - 1] = '\0';  // ensure termination
 
-  strncpy(work_buffer2_, root_dir_, work_buffer2_len_);
-  strncpy(work_buffer2_ + root_dir_len_, ptr + oldpath_sz + 1,
-          work_buffer2_len_ - root_dir_len_);
+  strncpy(work_buffer2_, root_directory_.c_str(), work_buffer2_len_);
+  strncpy(work_buffer2_ + root_directory_.length(), ptr + oldpath_sz + 1,
+          work_buffer2_len_ - root_directory_.length());
   work_buffer2_[work_buffer2_len_ - 1] = '\0';  // ensure termination
 
   if (rename(work_buffer1_, work_buffer2_) == 0) {
@@ -717,9 +719,9 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
 
 /// @brief Responds to a RemoveDirectory command
 FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
@@ -734,9 +736,9 @@ FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
 
 /// @brief Responds to a CreateDirectory command
 FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
-  strncpy(work_buffer1_, root_dir_, work_buffer1_len_);
-  strncpy(work_buffer1_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer1_len_ - root_dir_len_);
+  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
+  strncpy(work_buffer1_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer1_len_ - root_directory_.length());
   // ensure termination
   work_buffer1_[work_buffer1_len_ - 1] = '\0';
 
@@ -751,9 +753,9 @@ FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
 
 /// @brief Responds to a CalcFileCRC32 command
 FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
-  strncpy(work_buffer2_, root_dir_, work_buffer2_len_);
-  strncpy(work_buffer2_ + root_dir_len_, data_as_cstring(payload),
-          work_buffer2_len_ - root_dir_len_);
+  strncpy(work_buffer2_, root_directory_.c_str(), work_buffer2_len_);
+  strncpy(work_buffer2_ + root_directory_.length(), data_as_cstring(payload),
+          work_buffer2_len_ - root_directory_.length());
   // ensure termination
   work_buffer2_[work_buffer2_len_ - 1] = '\0';
 
@@ -801,7 +803,7 @@ char *FileServer::data_as_cstring(Payload *payload) {
 
 /// @brief Copy file (with limited space)
 int FileServer::CopyFile(const char *src_path, const char *dst_path,
-                           size_t length) {
+                         size_t length) {
   auto src_fd = ::open(src_path, O_RDONLY);
 
   if (src_fd < 0) {
