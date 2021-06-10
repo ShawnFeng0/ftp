@@ -47,50 +47,25 @@
 /// starts at a 3 byte offset, causing an unaligned access to seq_number and
 /// offset
 struct __attribute__((__packed__)) PayloadHeader {
+  uint32_t size;        ///< Size of data
+  uint32_t offset;      ///< Offsets for List and Read commands
   uint16_t seq_number;  ///< sequence number for message
   uint8_t session;      ///< Session id for read and write commands
   uint8_t opcode;       ///< Command opcode
-  uint8_t size;         ///< Size of data
   uint8_t req_opcode;   ///< Request opcode returned in kRspAck, kRspNak message
   uint8_t burst_complete;  ///< Only used if req_opcode=kCmdBurstReadFile - 1:
                            ///< set of burst packets complete, 0: More burst
                            ///< packets coming.
-  uint8_t padding;         ///< 32 bit aligment padding
-  uint32_t offset;         ///< Offsets for List and Read commands
   uint8_t data[];          ///< command data, varies by Opcode
 };
 
-// mavlink ftp macro
-#define MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN 254
-#define MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN 251
-
-class Mavlink {
+class FileServer {
  public:
-  size_t Write(const char *data, size_t len) { return len; }
-  size_t get_free_tx_buf() { return 300; }
-};
+  typedef size_t (*WriteCallback)(void *user_data, const char *data,
+                                  size_t len);
 
-/**
- * Get absolute time in [us] (does not wrap).
- */
-static inline uint64_t absolute_time_us() {
-  struct timespec ts = {};
-  uint64_t result;
-
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-
-  result = (uint64_t)(ts.tv_sec) * 1000000;
-  result += ts.tv_nsec / 1000;
-
-  return result;
-}
-
-/// MAVLink remote file server. Support FTP like commands using
-/// MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL message.
-class MavlinkFTP {
- public:
-  explicit MavlinkFTP(Mavlink *mavlink);
-  ~MavlinkFTP();
+  explicit FileServer(void *user_data, WriteCallback write_callback);
+  ~FileServer();
 
   /**
    * Handle sending of messages. Call this regularly at a fixed frequency.
@@ -174,10 +149,11 @@ class MavlinkFTP {
   static const char kDirentSkip =
       'S';  ///< Identifies Skipped entry from List command
 
+  static constexpr size_t kMaxPacketLength = 251;
+
   /// @brief Maximum data size in RequestHeader::data
-  static const uint8_t kMaxDataLength =
-      MAVLINK_MSG_FILE_TRANSFER_PROTOCOL_FIELD_PAYLOAD_LEN -
-      sizeof(PayloadHeader);
+  static constexpr size_t kMaxDataLength =
+      kMaxPacketLength - sizeof(PayloadHeader);
 
   struct SessionInfo {
     int fd;
@@ -190,11 +166,12 @@ class MavlinkFTP {
   struct SessionInfo _session_info {
   };  ///< Session info, fd=-1 for no active session
 
-  Mavlink *_mavlink;
+  void *user_data_;
+  WriteCallback write_callback_;
 
   /* do not allow copying this class */
-  MavlinkFTP(const MavlinkFTP &);
-  MavlinkFTP operator=(const MavlinkFTP &);
+  FileServer(const FileServer &);
+  FileServer operator=(const FileServer &);
 
   /* work buffers: they're allocated as soon as we get the first request (lazy,
    * since FTP is rarely used) */
