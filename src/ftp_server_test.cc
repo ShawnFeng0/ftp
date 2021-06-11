@@ -10,7 +10,8 @@ std::vector<uint8_t> GeneratePayloadBuffer(uint32_t size, uint32_t offset,
                                            uint8_t burst_complete,
                                            const std::string &data) {
   std::vector<uint8_t> payload_vector;
-  payload_vector.resize(sizeof(uftp::Payload) + data.size());
+  payload_vector.resize(sizeof(uftp::Payload) +
+                        uftp::FileServer::kMaxDataLength);
   auto payload = reinterpret_cast<uftp::Payload *>(payload_vector.data());
   payload->size = size;
   payload->offset = offset;
