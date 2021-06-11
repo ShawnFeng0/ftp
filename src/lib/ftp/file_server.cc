@@ -56,9 +56,8 @@ void FileServer::ProcessRequest(Payload *payload) {
 
   ErrorCode errorCode = kErrNone;
 
-  auto payload_str = payload->to_string();
-
 #ifdef FTP_DEBUG
+  auto payload_str = payload->to_string();
   LOGGER_TOKEN(payload_str.c_str());
 #endif
 
@@ -587,7 +586,7 @@ FileServer::ErrorCode FileServer::WorkReset(Payload *payload) {
 
 /// @brief Responds to a Rename command
 FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
-  char *ptr = payload->data_as_c_str();
+  const char *ptr = payload->data_as_c_str();
   size_t oldpath_sz = strlen(ptr);
 
   if (oldpath_sz == payload->size) {
@@ -859,8 +858,6 @@ void FileServer::Send() {
       session_info_.stream_download = false;
 
     } else {
-#ifndef MAVLINK_FTP_UNIT_TEST
-
       if (max_bytes_to_send < (get_size() * 2)) {
         more_data = false;
 
@@ -872,14 +869,10 @@ void FileServer::Send() {
         }
 
       } else {
-#endif
         more_data = true;
         payload->burst_complete = false;
-#ifndef MAVLINK_FTP_UNIT_TEST
         max_bytes_to_send -= get_size();
       }
-
-#endif
     }
 
     Reply(payload);

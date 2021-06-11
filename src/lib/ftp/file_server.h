@@ -23,15 +23,16 @@ struct Payload {
   uint8_t burst_complete;  ///< Only used if req_opcode=kCmdBurstReadFile - 1:
                            ///< set of burst packets complete, 0: More burst
                            ///< packets coming.
+  uint8_t padding[2];      ///< 32 bit alignment padding
   uint8_t data[];          ///< command data, varies by Opcode
 
-  /// @brief Guarantees that the payload data is null terminated.
-  ///     @return Returns a pointer to the payload data as a char *
-  char *data_as_c_str() {
-    // guarantee nul termination
-    data[size] = '\0';
-    // and return data
-    return (char *)&(data[0]);
+  const char *data_as_c_str() {
+    if (size) {
+      data[size - 1] = '\0';
+      return (const char *)&(data[0]);
+    } else {
+      return "";
+    }
   }
 
   std::string to_string() {

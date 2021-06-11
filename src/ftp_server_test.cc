@@ -20,7 +20,8 @@ std::vector<uint8_t> GeneratePayloadBuffer(uint32_t size, uint32_t offset,
   payload->opcode = opcode;
   payload->req_opcode = req_opcode;
   payload->burst_complete = burst_complete;
-  memcpy(payload->data, data.data(), data.size());
+  snprintf((char *)(payload->data), uftp::FileServer::kMaxDataLength, "%s",
+           data.c_str());
   return payload_vector;
 }
 
@@ -34,8 +35,8 @@ int main() {
   std::string directory{"."};
 
   auto payload_vector = GeneratePayloadBuffer(
-      directory.size(), 0, 0, 0, uftp::FileServer::Opcode::kCmdListDirectory, 0,
-      0, directory);
+      directory.size() + 1, 0, 0, 0,
+      uftp::FileServer::Opcode::kCmdListDirectory, 0, 0, directory);
   server.ProcessRequest(
       reinterpret_cast<uftp::Payload *>(payload_vector.data()));
   return 0;
