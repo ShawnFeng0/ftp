@@ -130,12 +130,6 @@ class FileServer {
   ErrorCode WorkRename(Payload *payload);
   ErrorCode WorkCalcFileCrc32(Payload *payload);
 
-  /**
-   * make sure that the working buffers _work_buffer* are allocated
-   * @return true if buffers exist, false if allocation failed
-   */
-  bool ensure_buffers_exist();
-
   static const char kDirentFile =
       'F';  ///< Identifies File returned from List command
   static const char kDirentDir =
@@ -159,11 +153,7 @@ class FileServer {
   FileServer(const FileServer &);
   FileServer operator=(const FileServer &);
 
-  /* work buffers: they're allocated as soon as we get the first request (lazy,
-   * since FTP is rarely used) */
-  char *work_buffer2_{nullptr};
-  static constexpr int work_buffer2_len_ = 256;
-  uint64_t last_work_buffer_access_{
+  uint64_t last_access_time_{
       0};  ///< timestamp when the buffers were last accessed
 
   // prepend a root directory to each file/dir access to avoid enumerating the

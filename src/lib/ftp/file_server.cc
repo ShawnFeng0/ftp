@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #include "crc32.h"
 #include "ulog/ulog.h"
@@ -41,7 +42,7 @@ FileServer::FileServer(std::string root_directory, void *user_data,
   session_info_.fd = -1;
 }
 
-FileServer::~FileServer() { delete[] work_buffer2_; }
+FileServer::~FileServer() = default;
 
 unsigned FileServer::get_size() const {
   return session_info_.stream_download ? kMaxPacketLength : 0;
@@ -58,12 +59,7 @@ void FileServer::ProcessRequest(Payload *payload) {
   LOGGER_TOKEN(payload_str.c_str());
 #endif
 
-  if (!ensure_buffers_exist()) {
-    LOGGER_ERROR("Failed to allocate buffers");
-    errorCode = kErrFailErrno;
-    errno = ENOMEM;
-    goto out;
-  }
+  last_access_time_ = absolute_time_us();
 
   // basic sanity checks; must validate length before use
   if (payload->size > kMaxDataLength) {
@@ -202,16 +198,6 @@ out:
   }
 }
 
-bool FileServer::ensure_buffers_exist() {
-  last_work_buffer_access_ = absolute_time_us();
-
-  if (!work_buffer2_) {
-    work_buffer2_ = new char[work_buffer2_len_];
-  }
-
-  return work_buffer2_;
-}
-
 /// @brief Sends the specified FTP response message out through mavlink
 void FileServer::Reply(Payload *payload) {
   // keep a copy of the last sent response ((n)ack), so that if it gets lost and
@@ -302,16 +288,11 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
 #endif
         // For files we get the file size as well
         direntType = kDirentFile;
-        int ret = snprintf(work_buffer2_, work_buffer2_len_, "%s/%s",
-                           work_path.c_str(), result->d_name);
-        bool buf_is_ok = ((ret > 0) && (ret < work_buffer2_len_));
+        std::string file_path = work_path + '/' + result->d_name;
 
-        if (buf_is_ok) {
-          struct stat st {};
-
-          if (stat(work_buffer2_, &st) == 0) {
-            fileSize = st.st_size;
-          }
+        struct stat st {};
+        if (stat(file_path.c_str(), &st) == 0) {
+          fileSize = st.st_size;
         }
 
         break;
@@ -339,27 +320,21 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
         direntType = kDirentSkip;
     }
 
+    std::string file_path;
+
     if (direntType == kDirentSkip) {
       // Skip send only dirent identifier
-      work_buffer2_[0] = '\0';
 
     } else if (direntType == kDirentFile) {
       // Files send filename and file length
-      int ret = snprintf(work_buffer2_, work_buffer2_len_, "%s\t%d",
-                         result->d_name, fileSize);
-      bool buf_is_ok = ((ret > 0) && (ret < work_buffer2_len_));
-
-      if (!buf_is_ok) {
-        work_buffer2_[work_buffer2_len_ - 1] = '\0';
-      }
+      file_path = std::string{result->d_name} + '\t' + std::to_string(fileSize);
 
     } else {
       // Everything else just sends name
-      strncpy(work_buffer2_, result->d_name, work_buffer2_len_);
-      work_buffer2_[work_buffer2_len_ - 1] = '\0';
+      file_path = result->d_name;
     }
 
-    size_t nameLen = strlen(work_buffer2_);
+    size_t nameLen = file_path.length();
 
     // Do we have room for the name, the one char directory identifier and the
     // null terminator?
@@ -369,7 +344,7 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
 
     // Move the data into the buffer
     payload->data[offset++] = direntType;
-    strcpy((char *)&payload->data[offset], work_buffer2_);
+    strcpy((char *)&payload->data[offset], file_path.c_str());
 #ifdef FTP_DEBUG
     LOGGER_INFO("FTP: list %s %s", work_path.c_str(),
                 (char *)&payload->data[offset - 1]);
@@ -575,14 +550,10 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
     return kErrFailErrno;
   }
 
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string old_path{root_directory_ + ptr};
+  std::string new_path{root_directory_ + std::string(ptr + oldpath_sz + 1)};
 
-  strncpy(work_buffer2_, root_directory_.c_str(), work_buffer2_len_);
-  strncpy(work_buffer2_ + root_directory_.length(), ptr + oldpath_sz + 1,
-          work_buffer2_len_ - root_directory_.length());
-  work_buffer2_[work_buffer2_len_ - 1] = '\0';  // ensure termination
-
-  if (rename(work_path.c_str(), work_buffer2_) == 0) {
+  if (rename(old_path.c_str(), new_path.c_str()) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -619,21 +590,20 @@ FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
 
 /// @brief Responds to a CalcFileCRC32 command
 FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
-  strncpy(work_buffer2_, root_directory_.c_str(), work_buffer2_len_);
-  strncpy(work_buffer2_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer2_len_ - root_directory_.length());
-  // ensure termination
-  work_buffer2_[work_buffer2_len_ - 1] = '\0';
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
-  int fd = ::open(work_buffer2_, O_RDONLY);
+  int fd = ::open(work_path.c_str(), O_RDONLY);
   if (fd < 0) {
     return kErrFailErrno;
   }
 
+  std::vector<uint8_t> buffer;
+  buffer.resize(256);
+
   uint32_t checksum = 0;
   ssize_t bytes_read;
   do {
-    bytes_read = ::read(fd, work_buffer2_, work_buffer2_len_);
+    bytes_read = ::read(fd, buffer.data(), buffer.size());
 
     if (bytes_read < 0) {
       int r_errno = errno;
@@ -642,8 +612,8 @@ FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
       return kErrFailErrno;
     }
 
-    checksum = uftp_crc32part((uint8_t *)work_buffer2_, bytes_read, checksum);
-  } while (bytes_read == work_buffer2_len_);
+    checksum = uftp_crc32part(buffer.data(), bytes_read, checksum);
+  } while (bytes_read == buffer.size());
 
   ::close(fd);
 
@@ -677,11 +647,14 @@ int FileServer::CopyFile(const char *src_path, const char *dst_path,
     return -1;
   }
 
+  std::vector<uint8_t> buffer;
+  buffer.resize(256);
+
   while (length > 0) {
     ssize_t bytes_read, bytes_written;
-    size_t blen = (length > work_buffer2_len_) ? work_buffer2_len_ : length;
+    size_t blen = std::min(length, buffer.size());
 
-    bytes_read = ::read(src_fd, work_buffer2_, blen);
+    bytes_read = ::read(src_fd, buffer.data(), blen);
 
     if (bytes_read == 0) {
       // EOF
@@ -693,7 +666,7 @@ int FileServer::CopyFile(const char *src_path, const char *dst_path,
       break;
     }
 
-    bytes_written = ::write(dst_fd, work_buffer2_, bytes_read);
+    bytes_written = ::write(dst_fd, buffer.data(), bytes_read);
 
     if (bytes_written != bytes_read) {
       LOGGER_ERROR("cp: short write");
@@ -712,18 +685,9 @@ int FileServer::CopyFile(const char *src_path, const char *dst_path,
 }
 
 void FileServer::Send() {
-  if (work_buffer2_) {
-    // free the work buffers if they are not used for a while
-    if ((absolute_time_us() - last_work_buffer_access_) > 2 * 1000 * 1000) {
-      if (work_buffer2_) {
-        delete[] work_buffer2_;
-        work_buffer2_ = nullptr;
-      }
-    }
-
-  } else if (session_info_.fd != -1) {
+  if (session_info_.fd != -1) {
     // close session without activity
-    if ((absolute_time_us() - last_work_buffer_access_) > 10 * 1000 * 1000) {
+    if ((absolute_time_us() - last_access_time_) > 10 * 1000 * 1000) {
       ::close(session_info_.fd);
       session_info_.fd = -1;
       session_info_.stream_download = false;
