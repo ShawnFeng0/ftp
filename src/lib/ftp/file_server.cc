@@ -41,10 +41,7 @@ FileServer::FileServer(std::string root_directory, void *user_data,
   session_info_.fd = -1;
 }
 
-FileServer::~FileServer() {
-  delete[] work_buffer1_;
-  delete[] work_buffer2_;
-}
+FileServer::~FileServer() { delete[] work_buffer2_; }
 
 unsigned FileServer::get_size() const {
   return session_info_.stream_download ? kMaxPacketLength : 0;
@@ -208,15 +205,11 @@ out:
 bool FileServer::ensure_buffers_exist() {
   last_work_buffer_access_ = absolute_time_us();
 
-  if (!work_buffer1_) {
-    work_buffer1_ = new char[work_buffer1_len_];
-  }
-
   if (!work_buffer2_) {
     work_buffer2_ = new char[work_buffer2_len_];
   }
 
-  return work_buffer1_ && work_buffer2_;
+  return work_buffer2_;
 }
 
 /// @brief Sends the specified FTP response message out through mavlink
@@ -244,24 +237,20 @@ void FileServer::Reply(Payload *payload) {
 
 /// @brief Responds to a List command
 FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer1_len_ - root_directory_.length());
-  // ensure termination
-  work_buffer1_[work_buffer1_len_ - 1] = '\0';
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
   ErrorCode errorCode = kErrNone;
   unsigned offset = 0;
 
-  DIR *dp = opendir(work_buffer1_);
+  DIR *dp = opendir(work_path.c_str());
 
   if (dp == nullptr) {
-    LOGGER_WARN("File open failed %s", work_buffer1_);
+    LOGGER_WARN("File open failed %s", work_path.c_str());
     return kErrFileNotFound;
   }
 
 #ifdef FTP_DEBUG
-  LOGGER_INFO("FTP: list %s offset %d", work_buffer1_, payload->offset);
+  LOGGER_INFO("FTP: list %s offset %d", work_path.c_str(), payload->offset);
 #endif
 
   // move to the requested offset
@@ -314,7 +303,7 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
         // For files we get the file size as well
         direntType = kDirentFile;
         int ret = snprintf(work_buffer2_, work_buffer2_len_, "%s/%s",
-                           work_buffer1_, result->d_name);
+                           work_path.c_str(), result->d_name);
         bool buf_is_ok = ((ret > 0) && (ret < work_buffer2_len_));
 
         if (buf_is_ok) {
@@ -382,7 +371,7 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
     payload->data[offset++] = direntType;
     strcpy((char *)&payload->data[offset], work_buffer2_);
 #ifdef FTP_DEBUG
-    LOGGER_INFO("FTP: list %s %s", work_buffer1_,
+    LOGGER_INFO("FTP: list %s %s", work_path.c_str(),
                 (char *)&payload->data[offset - 1]);
 #endif
     offset += nameLen + 1;
@@ -401,17 +390,15 @@ FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
     return kErrNoSessionsAvailable;
   }
 
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer1_len_ - root_directory_.length());
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
 #ifdef FTP_DEBUG
-  LOGGER_INFO("FTP: open '%s'", work_buffer1_);
+  LOGGER_INFO("FTP: open '%s'", work_path.c_str());
 #endif
 
   struct stat st {};
 
-  if (stat(work_buffer1_, &st) != 0) {
+  if (stat(work_path.c_str(), &st) != 0) {
     // fail only if requested open for read
     if (oflag & O_RDONLY) {
       return kErrFailErrno;
@@ -424,7 +411,7 @@ FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
   uint32_t fileSize = st.st_size;
 
   // Set mode to 666 incase oflag has O_CREAT
-  int fd = ::open(work_buffer1_, oflag,
+  int fd = ::open(work_path.c_str(), oflag,
                   S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 
   if (fd < 0) {
@@ -523,13 +510,9 @@ FileServer::ErrorCode FileServer::WorkWrite(Payload *payload) const {
 
 /// @brief Responds to a RemoveFile command
 FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer1_len_ - root_directory_.length());
-  // ensure termination
-  work_buffer1_[work_buffer1_len_ - 1] = '\0';
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
-  if (unlink(work_buffer1_) == 0) {
+  if (unlink(work_path.c_str()) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -540,14 +523,11 @@ FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
 
 /// @brief Responds to a TruncateFile command
 FileServer::ErrorCode FileServer::WorkTruncateFile(Payload *payload) {
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer1_len_ - root_directory_.length());
-  // ensure termination
-  work_buffer1_[work_buffer1_len_ - 1] = '\0';
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
+
   payload->size = 0;
 
-  int ret = truncate(work_buffer1_, payload->offset);
+  int ret = truncate(work_path.c_str(), payload->offset);
 
   if (ret == 0) {
     return kErrNone;
@@ -595,17 +575,14 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
     return kErrFailErrno;
   }
 
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), ptr,
-          work_buffer1_len_ - root_directory_.length());
-  work_buffer1_[work_buffer1_len_ - 1] = '\0';  // ensure termination
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
   strncpy(work_buffer2_, root_directory_.c_str(), work_buffer2_len_);
   strncpy(work_buffer2_ + root_directory_.length(), ptr + oldpath_sz + 1,
           work_buffer2_len_ - root_directory_.length());
   work_buffer2_[work_buffer2_len_ - 1] = '\0';  // ensure termination
 
-  if (rename(work_buffer1_, work_buffer2_) == 0) {
+  if (rename(work_path.c_str(), work_buffer2_) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -616,13 +593,9 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
 
 /// @brief Responds to a RemoveDirectory command
 FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer1_len_ - root_directory_.length());
-  // ensure termination
-  work_buffer1_[work_buffer1_len_ - 1] = '\0';
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
-  if (rmdir(work_buffer1_) == 0) {
+  if (rmdir(work_path.c_str()) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -633,13 +606,9 @@ FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
 
 /// @brief Responds to a CreateDirectory command
 FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
-  strncpy(work_buffer1_, root_directory_.c_str(), work_buffer1_len_);
-  strncpy(work_buffer1_ + root_directory_.length(), payload->data_as_c_str(),
-          work_buffer1_len_ - root_directory_.length());
-  // ensure termination
-  work_buffer1_[work_buffer1_len_ - 1] = '\0';
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
 
-  if (mkdir(work_buffer1_, S_IRWXU | S_IRWXG | S_IRWXO) == 0) {
+  if (mkdir(work_path.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == 0) {
     payload->size = 0;
     return kErrNone;
 
@@ -743,14 +712,9 @@ int FileServer::CopyFile(const char *src_path, const char *dst_path,
 }
 
 void FileServer::Send() {
-  if (work_buffer1_ || work_buffer2_) {
+  if (work_buffer2_) {
     // free the work buffers if they are not used for a while
     if ((absolute_time_us() - last_work_buffer_access_) > 2 * 1000 * 1000) {
-      if (work_buffer1_) {
-        delete[] work_buffer1_;
-        work_buffer1_ = nullptr;
-      }
-
       if (work_buffer2_) {
         delete[] work_buffer2_;
         work_buffer2_ = nullptr;

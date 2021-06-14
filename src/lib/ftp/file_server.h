@@ -161,8 +161,6 @@ class FileServer {
 
   /* work buffers: they're allocated as soon as we get the first request (lazy,
    * since FTP is rarely used) */
-  char *work_buffer1_{nullptr};
-  static constexpr int work_buffer1_len_ = kMaxDataLength;
   char *work_buffer2_{nullptr};
   static constexpr int work_buffer2_len_ = 256;
   uint64_t last_work_buffer_access_{
