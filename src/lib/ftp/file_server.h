@@ -63,7 +63,7 @@ class FileServer {
    * @param t current time
    */
   void Send();
-  void ProcessRequest(Payload *payload);
+  void ProcessRequest(const Payload *payload_in);
 
   /// @brief Command opcodes
   enum Opcode : uint8_t {
@@ -114,7 +114,7 @@ class FileServer {
  private:
   void Reply(Payload *payload);
 
-  int CopyFile(const char *src_path, const char *dst_path, size_t length);
+  static int CopyFile(const char *src_path, const char *dst_path, size_t length);
 
   ErrorCode WorkList(Payload *payload);
   ErrorCode WorkOpen(Payload *payload, int oflag);

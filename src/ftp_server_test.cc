@@ -39,5 +39,6 @@ int main() {
       uftp::FileServer::Opcode::kCmdListDirectory, 0, 0, directory);
   server.ProcessRequest(
       reinterpret_cast<uftp::Payload *>(payload_vector.data()));
+  server.Send();
   return 0;
 }

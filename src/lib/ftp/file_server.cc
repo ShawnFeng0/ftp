@@ -49,10 +49,16 @@ unsigned FileServer::get_size() const {
 }
 
 /// @brief Processes an FTP message
-void FileServer::ProcessRequest(Payload *payload) {
+void FileServer::ProcessRequest(const Payload *payload_in) {
   bool stream_send = false;
 
   ErrorCode errorCode = kErrNone;
+
+  std::vector<uint8_t> payload_buffer;
+  payload_buffer.resize(sizeof(Payload) + kMaxDataLength);
+  memcpy(payload_buffer.data(), payload_in,
+         std::min(payload_buffer.size(), sizeof(Payload) + payload_in->size));
+  auto payload = reinterpret_cast<Payload *>(payload_buffer.data());
 
 #ifdef FTP_DEBUG
   auto payload_str = payload->to_string();
@@ -62,7 +68,7 @@ void FileServer::ProcessRequest(Payload *payload) {
   last_access_time_ = absolute_time_us();
 
   // basic sanity checks; must validate length before use
-  if (payload->size > kMaxDataLength) {
+  if (payload_in->size > kMaxDataLength) {
     errorCode = kErrInvalidDataSize;
     goto out;
   }
