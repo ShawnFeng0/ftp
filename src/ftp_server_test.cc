@@ -1,4 +1,5 @@
 #include <ftp/file_server.h>
+#include <ftp/md5.h>
 #include <ulog/ulog.h>
 
 #include <iostream>
@@ -40,5 +41,17 @@ int main() {
   server.ProcessRequest(
       reinterpret_cast<uftp::Payload *>(payload_vector.data()));
   server.Send();
+
+  uftp::MD5 md5;
+  std::string str{
+      ";lkjasdfl;kjaskfl;djas;djawerpiuqwerpouasdklvzxvlasfjlqwerijl"};
+  md5.Update(reinterpret_cast<const uint8_t *>(str.data()), str.size());
+  char out[33];
+  md5.ToString(out);
+  LOGGER_TOKEN(out);
+
+  if (std::string{"72d308a8b4a438f6e97ebff6743b034e"} != out) {
+    LOGGER_ERROR("md5 error");
+  }
   return 0;
 }

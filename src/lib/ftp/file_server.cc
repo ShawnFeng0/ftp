@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "crc32.h"
+#include "md5.h"
 #include "ulog/ulog.h"
 
 #define FTP_DEBUG
@@ -162,6 +163,10 @@ void FileServer::ProcessRequest(const Payload *payload_in) {
 
     case kCmdCalcFileCRC32:
       errorCode = WorkCalcFileCrc32(payload);
+      break;
+
+    case kCmdCalcFileMD5:
+      errorCode = WorkCalcFileMd5(payload);
       break;
 
     default:
@@ -769,6 +774,43 @@ FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
 
   payload->size = sizeof(uint32_t);
   std::memcpy(payload->data, &checksum, payload->size);
+  return kErrNone;
+}
+
+/// @brief Responds to a CalcFileMd5 command
+FileServer::ErrorCode FileServer::WorkCalcFileMd5(Payload *payload) {
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
+
+  int fd = ::open(work_path.c_str(), O_RDONLY);
+  if (fd < 0) {
+    return kErrFailErrno;
+  }
+
+  std::vector<uint8_t> buffer;
+  buffer.resize(256);
+
+  ssize_t bytes_read;
+  MD5 md5;
+  do {
+    bytes_read = ::read(fd, buffer.data(), buffer.size());
+
+    if (bytes_read < 0) {
+      int r_errno = errno;
+      ::close(fd);
+      errno = r_errno;
+      return kErrFailErrno;
+    }
+
+    md5.Update(buffer.data(), bytes_read);
+  } while (bytes_read == buffer.size());
+
+  ::close(fd);
+
+  char md5_str[33];
+  md5.ToString(md5_str);
+
+  payload->size = sizeof(md5_str);
+  std::memcpy(payload->data, md5_str, payload->size);
   return kErrNone;
 }
 

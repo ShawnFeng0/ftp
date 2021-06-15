@@ -82,6 +82,7 @@ class FileServer {
     kCmdTruncateFile,   ///< Truncate file at <path> to <offset> length
     kCmdRename,         ///< Rename <path1> to <path2>
     kCmdCalcFileCRC32,  ///< Calculate CRC32 for file at <path>
+    kCmdCalcFileMD5,    ///< Calculate MD5 for file at <path>
     kCmdBurstReadFile,  ///< Burst download session file
 
     kRspAck = 128,  ///< Ack response
@@ -133,6 +134,7 @@ class FileServer {
   ErrorCode WorkTruncateFile(Payload *payload);
   ErrorCode WorkRename(Payload *payload);
   ErrorCode WorkCalcFileCrc32(Payload *payload);
+  ErrorCode WorkCalcFileMd5(Payload *payload);
 
   static const char kDirentFile =
       'F';  ///< Identifies File returned from List command
