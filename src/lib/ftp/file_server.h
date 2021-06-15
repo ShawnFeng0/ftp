@@ -85,7 +85,9 @@ class FileServer {
     kCmdBurstReadFile,  ///< Burst download session file
 
     kRspAck = 128,  ///< Ack response
-    kRspNak         ///< Nak response
+    kRspNak,        ///< Nak response
+
+    kCmdListDirectoryWithTimeInfo = 133,
   };
 
   /// @brief Error codes returned in Nak response PayloadHeader.data[0].
@@ -114,9 +116,11 @@ class FileServer {
  private:
   void Reply(Payload *payload);
 
-  static int CopyFile(const char *src_path, const char *dst_path, size_t length);
+  static int CopyFile(const char *src_path, const char *dst_path,
+                      size_t length);
 
   ErrorCode WorkList(Payload *payload);
+  ErrorCode WorkListWithTimeInfo(Payload *payload);
   ErrorCode WorkOpen(Payload *payload, int oflag);
   ErrorCode WorkRead(Payload *payload) const;
   ErrorCode WorkBurst(Payload *payload);

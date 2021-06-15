@@ -36,7 +36,7 @@ int main() {
 
   auto payload_vector = GeneratePayloadBuffer(
       directory.size() + 1, 0, 0, 0,
-      uftp::FileServer::Opcode::kCmdListDirectory, 0, 0, directory);
+      uftp::FileServer::Opcode::kCmdListDirectoryWithTimeInfo, 0, 0, directory);
   server.ProcessRequest(
       reinterpret_cast<uftp::Payload *>(payload_vector.data()));
   server.Send();

@@ -111,6 +111,10 @@ void FileServer::ProcessRequest(const Payload *payload_in) {
       errorCode = WorkList(payload);
       break;
 
+    case kCmdListDirectoryWithTimeInfo:
+      errorCode = WorkListWithTimeInfo(payload);
+      break;
+
     case kCmdOpenFileRO:
       errorCode = WorkOpen(payload, O_RDONLY);
       break;
@@ -351,6 +355,146 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
     // Move the data into the buffer
     payload->data[offset++] = direntType;
     strcpy((char *)&payload->data[offset], file_path.c_str());
+#ifdef FTP_DEBUG
+    LOGGER_INFO("FTP: list %s %s", work_path.c_str(),
+                (char *)&payload->data[offset - 1]);
+#endif
+    offset += nameLen + 1;
+  }
+
+  closedir(dp);
+  payload->size = offset;
+
+  return errorCode;
+}
+
+/// @brief Responds to a List command
+FileServer::ErrorCode FileServer::WorkListWithTimeInfo(Payload *payload) {
+  std::string work_path{root_directory_ + payload->data_as_c_str()};
+
+  ErrorCode errorCode = kErrNone;
+  unsigned offset = 0;
+
+  DIR *dp = opendir(work_path.c_str());
+
+  if (dp == nullptr) {
+    LOGGER_WARN("File open failed %s", work_path.c_str());
+    return kErrFileNotFound;
+  }
+
+#ifdef FTP_DEBUG
+  LOGGER_INFO("FTP: list %s offset %d", work_path.c_str(), payload->offset);
+#endif
+
+  // move to the requested offset
+  auto requested_offset = payload->offset;
+
+  while (requested_offset-- > 0 && readdir(dp)) {
+  }
+
+  for (;;) {
+    errno = 0;
+    struct dirent *result = readdir(dp);
+
+    // read the directory entry
+    if (result == nullptr) {
+      if (errno) {
+        LOGGER_WARN("readdir failed");
+        payload->data[offset++] = kDirentSkip;
+        *((char *)&payload->data[offset]) = '\0';
+        offset++;
+        payload->size = offset;
+        closedir(dp);
+
+        return errorCode;
+      }
+
+      // no more entries?
+      if (payload->offset != 0 && offset == 0) {
+        // User is requesting subsequent dir entries but there were none. This
+        // means the user asked to seek past EOF.
+        errorCode = kErrEOF;
+      }
+
+      // Otherwise we are just at the last directory entry, so we leave the
+      // errorCode at kErrorNone to signal that
+      break;
+    }
+
+    char direntType;
+
+    // Determine the directory entry type
+    switch (result->d_type) {
+#ifdef __PX4_NUTTX
+
+      case DTYPE_FILE: {
+#else
+
+      case DT_REG: {
+#endif
+        // For files we get the file size as well
+        direntType = kDirentFile;
+        break;
+      }
+
+#ifdef __PX4_NUTTX
+
+      case DTYPE_DIRECTORY:
+#else
+      case DT_DIR:
+#endif
+        if (strcmp(result->d_name, ".") == 0 ||
+            strcmp(result->d_name, "..") == 0) {
+          // Don't bother sending these back
+          direntType = kDirentSkip;
+
+        } else {
+          direntType = kDirentDir;
+        }
+
+        break;
+
+      default:
+        // We only send back file and diretory entries, skip everything else
+        direntType = kDirentSkip;
+    }
+
+    std::string file_info;
+
+    if (direntType == kDirentSkip) {
+      // Skip send only dirent identifier
+
+    } else if (direntType == kDirentFile) {
+      file_info = work_path + '/' + result->d_name;
+
+      struct stat st {};
+      if (stat(file_info.c_str(), &st) == 0) {
+        // Files send filename and file length
+        file_info =
+            std::string{result->d_name} + '\t' + std::to_string(st.st_size) +
+            '\t' + std::to_string(st.st_atime) + '\t' +
+            std::to_string(st.st_mtime) + '\t' + std::to_string(st.st_ctime);
+      } else {
+        // Everything else just sends name
+        file_info = result->d_name;
+      }
+
+    } else {
+      // Everything else just sends name
+      file_info = result->d_name;
+    }
+
+    size_t nameLen = file_info.length();
+
+    // Do we have room for the name, the one char directory identifier and the
+    // null terminator?
+    if ((offset + nameLen + 2) > kMaxDataLength) {
+      break;
+    }
+
+    // Move the data into the buffer
+    payload->data[offset++] = direntType;
+    strcpy((char *)&payload->data[offset], file_info.c_str());
 #ifdef FTP_DEBUG
     LOGGER_INFO("FTP: list %s %s", work_path.c_str(),
                 (char *)&payload->data[offset - 1]);
