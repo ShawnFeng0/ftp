@@ -214,7 +214,7 @@ out:
 }
 
 /// @brief Sends the specified FTP response message out through mavlink
-void FileServer::Reply(Payload *payload) {
+int FileServer::Reply(Payload *payload) {
   // keep a copy of the last sent response ((n)ack), so that if it gets lost and
   // the GCS resends the request, we can simply resend the response. we only
   // keep small responses to reduce RAM usage and avoid large memcpy's. The
@@ -231,8 +231,10 @@ void FileServer::Reply(Payload *payload) {
 #endif
 
   if (write_callback_) {
-    write_callback_(user_data_, reinterpret_cast<const char *>(payload),
-                    sizeof(Payload) + payload->size);
+    return write_callback_(user_data_, reinterpret_cast<const char *>(payload),
+                           sizeof(Payload) + payload->size);
+  } else {
+    return 0;
   }
 }
 
@@ -605,7 +607,6 @@ FileServer::ErrorCode FileServer::WorkBurst(Payload *payload) {
   // Setup for streaming sends
   session_info_.stream_download = true;
   session_info_.stream_offset = payload->offset;
-  session_info_.stream_chunk_transmitted = 0;
   session_info_.stream_seq_number = payload->seq_number + 1;
 
   return kErrNone;
@@ -893,34 +894,24 @@ void FileServer::Send() {
     return;
   }
 
-  // Skip send if not enough room
-  unsigned max_bytes_to_send = get_size();
-
-#ifdef FTP_DEBUG
-  LOGGER_INFO("MavlinkFTP::send max_bytes_to_send(%d)", max_bytes_to_send);
-#endif
-
-  if (max_bytes_to_send < get_size()) {
-    return;
-  }
-
   // Send stream packets until buffer is full
-
   bool more_data;
 
   do {
     more_data = false;
 
     ErrorCode error_code = kErrNone;
-
-    uint8_t payload_buffer[sizeof(Payload) + kMaxDataLength];
-    auto *payload = reinterpret_cast<Payload *>(&payload_buffer[0]);
+    std::vector<uint8_t> payload_vector;
+    payload_vector.resize(sizeof(uftp::Payload) +
+                          uftp::FileServer::kMaxDataLength);
+    auto payload = reinterpret_cast<uftp::Payload *>(payload_vector.data());
 
     payload->seq_number = session_info_.stream_seq_number;
     payload->session = 0;
     payload->opcode = kRspAck;
     payload->req_opcode = kCmdBurstReadFile;
     payload->offset = session_info_.stream_offset;
+    payload->burst_complete = false; // Not use
     session_info_.stream_seq_number++;
 
 #ifdef FTP_DEBUG
@@ -957,8 +948,6 @@ void FileServer::Send() {
 
       } else {
         payload->size = bytes_read;
-        session_info_.stream_offset += bytes_read;
-        session_info_.stream_chunk_transmitted += bytes_read;
       }
     }
 
@@ -975,26 +964,29 @@ void FileServer::Send() {
         payload->data[1] = r_errno;
       }
 
+      Reply(payload);
+
       session_info_.stream_download = false;
 
     } else {
-      if (max_bytes_to_send < (get_size() * 2)) {
+      int send_length = Reply(payload);
+
+      // Sending failed, there is a problem, the session should be ended
+      if (send_length < 0) {
+        session_info_.stream_download = false;
+#ifdef FTP_DEBUG
+        LOGGER_WARN("stream download: send fail");
+#endif
+
+      } else if (send_length == 0) {
+        // Sending failed, but not an error, try again next time
         more_data = false;
-
-        /* perform transfers in 35K chunks - this is determined empirical */
-        if (session_info_.stream_chunk_transmitted > 35000) {
-          payload->burst_complete = true;
-          session_info_.stream_download = false;
-          session_info_.stream_chunk_transmitted = 0;
-        }
-
       } else {
+        // Send successfully, continue to send
         more_data = true;
-        payload->burst_complete = false;
-        max_bytes_to_send -= get_size();
+        session_info_.stream_offset += payload->size;
       }
     }
 
-    Reply(payload);
   } while (more_data);
 }

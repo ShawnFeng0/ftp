@@ -28,9 +28,9 @@ std::vector<uint8_t> GeneratePayloadBuffer(uint32_t size, uint32_t offset,
 
 int main() {
   uftp::FileServer server{
-      "", nullptr, [](void *user_data, const char *data, size_t len) -> size_t {
+      "", nullptr, [](void *user_data, const char *data, size_t len) -> int {
         LOGGER_HEX_DUMP(data, len, 16);
-        return len;
+        return (int)len;
       }};
 
   std::string directory{"."};

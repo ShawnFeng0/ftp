@@ -51,8 +51,7 @@ struct Payload {
 
 class FileServer {
  public:
-  typedef size_t (*WriteCallback)(void *user_data, const char *data,
-                                  size_t len);
+  typedef int (*WriteCallback)(void *user_data, const char *data, size_t len);
 
   explicit FileServer(std::string root_directory, void *user_data,
                       WriteCallback write_callback);
@@ -115,7 +114,7 @@ class FileServer {
   static constexpr size_t kMaxDataLength = kMaxPacketLength - sizeof(Payload);
 
  private:
-  void Reply(Payload *payload);
+  int Reply(Payload *payload);
 
   static int CopyFile(const char *src_path, const char *dst_path,
                       size_t length);
@@ -149,7 +148,6 @@ class FileServer {
     bool stream_download;
     uint32_t stream_offset;
     uint16_t stream_seq_number;
-    unsigned stream_chunk_transmitted;
   } session_info_{};  ///< Session info, fd=-1 for no active session
 
   void *user_data_;
