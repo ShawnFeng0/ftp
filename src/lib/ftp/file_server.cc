@@ -226,8 +226,9 @@ int FileServer::Reply(Payload *payload) {
   }
 
 #ifdef FTP_DEBUG
-  LOGGER_INFO("FTP: %s seq_number: %d",
-              payload->opcode == kRspAck ? "Ack" : "Nak", payload->seq_number);
+//  LOGGER_INFO("FTP: %s seq_number: %d",
+//              payload->opcode == kRspAck ? "Ack" : "Nak",
+//              payload->seq_number);
 #endif
 
   if (write_callback_) {
@@ -877,18 +878,7 @@ int FileServer::CopyFile(const char *src_path, const char *dst_path,
   return (length > 0) ? -1 : 0;
 }
 
-void FileServer::Send() {
-  if (session_info_.fd != -1) {
-    // close session without activity
-    if ((absolute_time_us() - last_access_time_) > 10 * 1000 * 1000) {
-      ::close(session_info_.fd);
-      session_info_.fd = -1;
-      session_info_.stream_download = false;
-      last_reply_valid_ = false;
-      LOGGER_WARN("Session was closed without activity");
-    }
-  }
-
+void FileServer::ProcessSend(size_t max_frames) {
   // Anything to stream?
   if (!session_info_.stream_download) {
     return;
@@ -911,7 +901,7 @@ void FileServer::Send() {
     payload->opcode = kRspAck;
     payload->req_opcode = kCmdBurstReadFile;
     payload->offset = session_info_.stream_offset;
-    payload->burst_complete = false; // Not use
+    payload->burst_complete = false;  // Not use
     session_info_.stream_seq_number++;
 
 #ifdef FTP_DEBUG
@@ -987,6 +977,5 @@ void FileServer::Send() {
         session_info_.stream_offset += payload->size;
       }
     }
-
-  } while (more_data);
+  } while (more_data && max_frames--);
 }

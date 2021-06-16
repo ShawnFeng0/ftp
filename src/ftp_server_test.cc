@@ -40,7 +40,7 @@ int main() {
       uftp::FileServer::Opcode::kCmdListDirectoryWithTimeInfo, 0, 0, directory);
   server.ProcessRequest(
       reinterpret_cast<uftp::Payload *>(payload_vector.data()));
-  server.Send();
+  server.ProcessSend(10);
 
   uftp::MD5 md5;
   std::string str{
