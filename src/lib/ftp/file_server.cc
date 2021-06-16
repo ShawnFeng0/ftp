@@ -17,8 +17,6 @@
 #include "md5.h"
 #include "ulog/ulog.h"
 
-#define FTP_DEBUG
-
 using namespace uftp;
 
 FileServer::FileServer(std::string root_directory, void *user_data,

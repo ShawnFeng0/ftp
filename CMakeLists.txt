@@ -7,4 +7,5 @@ add_subdirectory(src/lib/ulog)
 
 include_directories(src/lib)
 add_executable(mavlink_ftp src/ftp_server_test.cc src/lib/ftp/file_server.cc src/lib/ftp/crc32.c src/lib/ftp/md5.cc)
+target_compile_definitions(mavlink_ftp PUBLIC FTP_DEBUG)
 target_link_libraries(mavlink_ftp ulog)
