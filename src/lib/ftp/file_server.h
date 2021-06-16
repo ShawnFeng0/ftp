@@ -107,8 +107,6 @@ class FileServer {
     kErrFileNotFound        ///< File/directory not found
   };
 
-  unsigned get_size() const;
-
   static constexpr size_t kMaxPacketLength = 251;
 
   /// @brief Maximum data size in RequestHeader::data
@@ -116,9 +114,6 @@ class FileServer {
 
  private:
   int Reply(Payload *payload);
-
-  static int CopyFile(const char *src_path, const char *dst_path,
-                      size_t length);
 
   ErrorCode WorkList(Payload *payload);
   ErrorCode WorkListWithTimeInfo(Payload *payload);
@@ -158,9 +153,6 @@ class FileServer {
   /* do not allow copying this class */
   FileServer(const FileServer &);
   FileServer operator=(const FileServer &);
-
-  uint64_t last_access_time_{
-      0};  ///< timestamp when the buffers were last accessed
 
   // prepend a root directory to each file/dir access to avoid enumerating the
   // full FS tree (e.g. on Linux). Note that requests can still fall outside of

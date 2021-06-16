@@ -19,19 +19,6 @@
 
 #define FTP_DEBUG
 
-/**
- * Get absolute time in [us] (does not wrap).
- */
-static inline uint64_t absolute_time_us() {
-  struct timespec ts = {};
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-
-  uint64_t result = (uint64_t)(ts.tv_sec) * 1000000;
-  result += ts.tv_nsec / 1000;
-
-  return result;
-}
-
 using namespace uftp;
 
 FileServer::FileServer(std::string root_directory, void *user_data,
@@ -44,10 +31,6 @@ FileServer::FileServer(std::string root_directory, void *user_data,
 }
 
 FileServer::~FileServer() = default;
-
-unsigned FileServer::get_size() const {
-  return session_info_.stream_download ? kMaxPacketLength : 0;
-}
 
 /// @brief Processes an FTP message
 void FileServer::ProcessRequest(const Payload *payload_in) {
@@ -67,8 +50,6 @@ void FileServer::ProcessRequest(const Payload *payload_in) {
   auto payload_str = payload->to_string();
   LOGGER_TOKEN(payload_str.c_str());
 #endif
-
-  last_access_time_ = absolute_time_us();
 
   // basic sanity checks; must validate length before use
   if (payload_in->size > kMaxDataLength) {
@@ -816,68 +797,6 @@ FileServer::ErrorCode FileServer::WorkCalcFileMd5(Payload *payload) {
   payload->size = sizeof(md5_str);
   std::memcpy(payload->data, md5_str, payload->size);
   return kErrNone;
-}
-
-/// @brief Copy file (with limited space)
-int FileServer::CopyFile(const char *src_path, const char *dst_path,
-                         size_t length) {
-  auto src_fd = ::open(src_path, O_RDONLY);
-
-  if (src_fd < 0) {
-    return -1;
-  }
-
-  auto dst_fd = ::open(dst_path, O_CREAT | O_TRUNC | O_WRONLY
-// POSIX requires the permissions to be supplied if O_CREAT passed
-#ifdef __PX4_POSIX
-                       ,
-                       0666
-#endif
-  );
-
-  int op_errno = 0;
-  if (dst_fd < 0) {
-    op_errno = errno;
-    ::close(src_fd);
-    errno = op_errno;
-    return -1;
-  }
-
-  std::vector<uint8_t> buffer;
-  buffer.resize(256);
-
-  while (length > 0) {
-    ssize_t bytes_read, bytes_written;
-    size_t blen = std::min(length, buffer.size());
-
-    bytes_read = ::read(src_fd, buffer.data(), blen);
-
-    if (bytes_read == 0) {
-      // EOF
-      break;
-
-    } else if (bytes_read < 0) {
-      LOGGER_ERROR("cp: read");
-      op_errno = errno;
-      break;
-    }
-
-    bytes_written = ::write(dst_fd, buffer.data(), bytes_read);
-
-    if (bytes_written != bytes_read) {
-      LOGGER_ERROR("cp: short write");
-      op_errno = errno;
-      break;
-    }
-
-    length -= bytes_written;
-  }
-
-  ::close(src_fd);
-  ::close(dst_fd);
-
-  errno = op_errno;
-  return (length > 0) ? -1 : 0;
 }
 
 void FileServer::ProcessSend(size_t max_frames) {
