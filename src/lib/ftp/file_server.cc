@@ -28,6 +28,8 @@ FileServer::FileServer(std::string root_directory, void *user_data,
       write_callback_(write_callback) {
   // initialize session
   session_info_.fd = -1;
+  burst_payload_.resize(sizeof(uftp::Payload) +
+                        uftp::FileServer::kMaxDataLength);
 }
 
 FileServer::~FileServer() = default;
@@ -811,18 +813,14 @@ void FileServer::ProcessSend(size_t max_frames) {
   bool more_data;
 
 #ifdef FTP_DEBUG
-    LOGGER_INFO("stream send: offset %d", session_info_.stream_offset);
+  LOGGER_INFO("stream send: offset %d", session_info_.stream_offset);
 #endif
 
   do {
     more_data = false;
 
     ErrorCode error_code = kErrNone;
-    std::vector<uint8_t> payload_vector;
-    payload_vector.resize(sizeof(uftp::Payload) +
-                          uftp::FileServer::kMaxDataLength);
-    auto payload = reinterpret_cast<uftp::Payload *>(payload_vector.data());
-
+    auto payload = reinterpret_cast<uftp::Payload *>(burst_payload_.data());
     payload->seq_number = session_info_.stream_seq_number;
     payload->session = 0;
     payload->opcode = kRspAck;
@@ -903,6 +901,6 @@ void FileServer::ProcessSend(size_t max_frames) {
   } while (more_data && max_frames--);
 
 #ifdef FTP_DEBUG
-    LOGGER_INFO("stream send over: offset %d", session_info_.stream_offset);
+  LOGGER_INFO("stream send over: offset %d", session_info_.stream_offset);
 #endif
 }

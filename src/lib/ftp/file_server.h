@@ -6,6 +6,7 @@
 #include <ctime>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace uftp {
 
@@ -158,6 +159,8 @@ class FileServer {
   // full FS tree (e.g. on Linux). Note that requests can still fall outside of
   // the root dir by using ../..
   const std::string root_directory_;
+
+  std::vector<uint8_t> burst_payload_;
 
   bool last_reply_valid_ = false;
   uint8_t last_reply_[sizeof(Payload) + sizeof(uint32_t)]{};
