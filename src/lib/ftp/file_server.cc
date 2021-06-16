@@ -55,6 +55,8 @@ void FileServer::ProcessRequest(const Payload *payload_in) {
 
   ErrorCode errorCode = kErrNone;
 
+  std::unique_lock<std::mutex> lg(session_lock_);
+
   std::vector<uint8_t> payload_buffer;
   payload_buffer.resize(sizeof(Payload) + kMaxDataLength);
   memcpy(payload_buffer.data(), payload_in,
@@ -879,6 +881,8 @@ int FileServer::CopyFile(const char *src_path, const char *dst_path,
 }
 
 void FileServer::ProcessSend(size_t max_frames) {
+  std::unique_lock<std::mutex> lg(session_lock_);
+
   // Anything to stream?
   if (!session_info_.stream_download) {
     return;
@@ -886,6 +890,10 @@ void FileServer::ProcessSend(size_t max_frames) {
 
   // Send stream packets until buffer is full
   bool more_data;
+
+#ifdef FTP_DEBUG
+    LOGGER_INFO("stream send: offset %d", session_info_.stream_offset);
+#endif
 
   do {
     more_data = false;
@@ -903,10 +911,6 @@ void FileServer::ProcessSend(size_t max_frames) {
     payload->offset = session_info_.stream_offset;
     payload->burst_complete = false;  // Not use
     session_info_.stream_seq_number++;
-
-#ifdef FTP_DEBUG
-    LOGGER_INFO("stream send: offset %d", session_info_.stream_offset);
-#endif
 
     // We have to test seek past EOF ourselves, lseek will allow seek past EOF
     if (session_info_.stream_offset >= session_info_.file_size) {
@@ -978,4 +982,8 @@ void FileServer::ProcessSend(size_t max_frames) {
       }
     }
   } while (more_data && max_frames--);
+
+#ifdef FTP_DEBUG
+    LOGGER_INFO("stream send over: offset %d", session_info_.stream_offset);
+#endif
 }

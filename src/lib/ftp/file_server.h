@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <ctime>
+#include <mutex>
 #include <string>
 
 namespace uftp {
@@ -149,6 +150,7 @@ class FileServer {
     uint32_t stream_offset;
     uint16_t stream_seq_number;
   } session_info_{};  ///< Session info, fd=-1 for no active session
+  mutable std::mutex session_lock_;
 
   void *user_data_;
   WriteCallback write_callback_;
