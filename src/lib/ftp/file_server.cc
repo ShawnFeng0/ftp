@@ -799,12 +799,14 @@ FileServer::ErrorCode FileServer::WorkCalcFileMd5(Payload *payload) {
   return kErrNone;
 }
 
-void FileServer::ProcessSend(size_t max_frames) {
+int FileServer::ProcessSend(size_t max_frames) {
   std::unique_lock<std::mutex> lg(session_lock_);
+
+  int send_length = 0;
 
   // Anything to stream?
   if (!session_info_.stream_download) {
-    return;
+    return 0;
   }
 
   // Send stream packets until buffer is full
@@ -873,12 +875,12 @@ void FileServer::ProcessSend(size_t max_frames) {
         payload->data[1] = r_errno;
       }
 
-      Reply(payload);
+      send_length = Reply(payload);
 
       session_info_.stream_download = false;
 
     } else {
-      int send_length = Reply(payload);
+      send_length = Reply(payload);
 
       // Sending failed, there is a problem, the session should be ended
       if (send_length < 0) {
@@ -901,4 +903,5 @@ void FileServer::ProcessSend(size_t max_frames) {
 #ifdef FTP_DEBUG
   LOGGER_INFO("stream send over: offset %d", session_info_.stream_offset);
 #endif
+  return send_length;
 }

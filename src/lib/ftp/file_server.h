@@ -63,7 +63,7 @@ class FileServer {
    * Handle sending of messages. Call this regularly at a fixed frequency.
    * @param t current time
    */
-  void ProcessSend(size_t max_frames);
+  int ProcessSend(size_t max_frames);
   void ProcessRequest(const Payload *payload_in);
 
   /// @brief Command opcodes
