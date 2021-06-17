@@ -108,7 +108,7 @@ class FileServer {
     kErrFileNotFound        ///< File/directory not found
   };
 
-  static constexpr size_t kMaxPacketLength = 251;
+  static constexpr size_t kMaxPacketLength = 2048;
 
   /// @brief Maximum data size in RequestHeader::data
   static constexpr size_t kMaxDataLength = kMaxPacketLength - sizeof(Payload);
