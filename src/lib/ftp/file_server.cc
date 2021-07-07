@@ -224,7 +224,7 @@ int FileServer::Reply(Payload *payload) {
 
 /// @brief Responds to a List command
 FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   ErrorCode errorCode = kErrNone;
   unsigned offset = 0;
@@ -361,7 +361,7 @@ FileServer::ErrorCode FileServer::WorkList(Payload *payload) {
 
 /// @brief Responds to a List command
 FileServer::ErrorCode FileServer::WorkListWithTimeInfo(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   ErrorCode errorCode = kErrNone;
   unsigned offset = 0;
@@ -506,7 +506,7 @@ FileServer::ErrorCode FileServer::WorkOpen(Payload *payload, int oflag) {
     return kErrNoSessionsAvailable;
   }
 
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
 #ifdef FTP_DEBUG
   LOGGER_INFO("FTP: open '%s'", work_path.c_str());
@@ -625,7 +625,7 @@ FileServer::ErrorCode FileServer::WorkWrite(Payload *payload) const {
 
 /// @brief Responds to a RemoveFile command
 FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   if (unlink(work_path.c_str()) == 0) {
     payload->size = 0;
@@ -638,7 +638,7 @@ FileServer::ErrorCode FileServer::WorkRemoveFile(Payload *payload) {
 
 /// @brief Responds to a TruncateFile command
 FileServer::ErrorCode FileServer::WorkTruncateFile(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   payload->size = 0;
 
@@ -681,7 +681,7 @@ FileServer::ErrorCode FileServer::WorkReset(Payload *payload) {
 
 /// @brief Responds to a Rename command
 FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
-  const char *ptr = payload->data_as_c_str();
+  const char *ptr = reinterpret_cast<const char *>(payload->data);
   size_t oldpath_sz = strlen(ptr);
 
   if (oldpath_sz == payload->size) {
@@ -704,7 +704,7 @@ FileServer::ErrorCode FileServer::WorkRename(Payload *payload) {
 
 /// @brief Responds to a RemoveDirectory command
 FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   if (rmdir(work_path.c_str()) == 0) {
     payload->size = 0;
@@ -717,7 +717,7 @@ FileServer::ErrorCode FileServer::WorkRemoveDirectory(Payload *payload) {
 
 /// @brief Responds to a CreateDirectory command
 FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   if (mkdir(work_path.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == 0) {
     payload->size = 0;
@@ -730,7 +730,7 @@ FileServer::ErrorCode FileServer::WorkCreateDirectory(Payload *payload) {
 
 /// @brief Responds to a CalcFileCRC32 command
 FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   int fd = ::open(work_path.c_str(), O_RDONLY);
   if (fd < 0) {
@@ -764,7 +764,7 @@ FileServer::ErrorCode FileServer::WorkCalcFileCrc32(Payload *payload) {
 
 /// @brief Responds to a CalcFileMd5 command
 FileServer::ErrorCode FileServer::WorkCalcFileMd5(Payload *payload) {
-  std::string work_path{root_directory_ + payload->data_as_c_str()};
+  std::string work_path{root_directory_ + payload->data2string()};
 
   int fd = ::open(work_path.c_str(), O_RDONLY);
   if (fd < 0) {

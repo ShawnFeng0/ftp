@@ -28,14 +28,7 @@ struct Payload {
   uint8_t padding[2];      ///< 32 bit alignment padding
   uint8_t data[];          ///< command data, varies by Opcode
 
-  const char *data_as_c_str() {
-    if (size) {
-      data[size - 1] = '\0';
-      return (const char *)&(data[0]);
-    } else {
-      return "";
-    }
-  }
+  std::string data2string() { return std::string{data, data + size}; }
 
   std::string to_string() {
     std::string result;
@@ -46,7 +39,7 @@ struct Payload {
     result += "opcode:" + std::to_string(opcode) + " ";
     result += "req_opcode:" + std::to_string(req_opcode) + " ";
     result += "burst_complete:" + std::to_string(burst_complete) + " ";
-    result += "data:" + std::string(data_as_c_str()) + " ";
+    result += "data:" + data2string();
     return result;
   }
 };
